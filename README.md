@@ -53,17 +53,39 @@ All settings live in `.env` (see `.env.example`). Key ones:
   `openai/gpt-4o-mini`, `google/gemini-2.0-flash`
 - `FRIDAY_MIKU_SPACE_ID` — your duplicated Miku RVC Space (Phase 2)
 
-## The Miku voice spike
+## Enabling the Miku voice (Phase 2)
 
-Before wiring Miku in, benchmark the cloud path:
+FRIDAY clones Miku's voice with **GPT-SoVITS** on a hosted Space — give it a short
+reference clip and it speaks any text in that voice. Nothing heavy runs locally.
 
 ```bash
 pip install gradio_client
-python scripts/spike_rvc_benchmark.py --space <your-hf-user>/mikuTTS
 ```
 
-Measures warm round-trip latency and lets you compare an English vs Japanese base
-voice. See the spike output to decide cloud-vs-local and base-voice language.
+Then in `.env`:
+
+```ini
+FRIDAY_TTS_ENGINE=miku
+FRIDAY_MIKU_SPACE_ID=lj1995/GPT-SoVITS-ProPlus
+FRIDAY_HF_TOKEN=hf_xxx           # REQUIRED — these Spaces run on ZeroGPU
+FRIDAY_MIKU_REF_AUDIO=cache/miku_ref.wav   # a 3-10s clean Miku clip (wav or mp3)
+FRIDAY_MIKU_REF_TEXT=            # transcript of the clip (blank = ref-free)
+FRIDAY_MIKU_REF_LANG=ja
+```
+
+- **HF token:** create a free "read" token at <https://huggingface.co/settings/tokens>.
+  Without it, ZeroGPU refuses the request.
+- **Reference clip:** 3-10 seconds of clean Miku speech. GPT-SoVITS resamples for
+  you, so any wav/mp3 works.
+
+Verify it (writes `cache/tts_selftest.wav`, no OpenRouter key needed):
+
+```bash
+python -m friday.main --tts-selftest "Hello, I am Friday." --play
+```
+
+If the Miku engine can't start (missing clip/token), FRIDAY automatically falls
+back to the offline SAPI voice so it always speaks.
 
 ## Legal & privacy
 

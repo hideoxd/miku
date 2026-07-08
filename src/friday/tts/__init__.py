@@ -36,6 +36,19 @@ def _create(name: str, settings: Settings) -> TTSEngine:
         from .piper_tts import PiperEngine
 
         return PiperEngine(model_path=settings.tts_voice, speed=settings.tts_speed)
+    if name == "miku":
+        from .gpt_sovits import GptSovitsMikuEngine
+
+        return GptSovitsMikuEngine(
+            settings.miku_space_id,
+            settings.miku_ref_audio,
+            ref_text=settings.miku_ref_text,
+            ref_lang=settings.miku_ref_lang,
+            text_lang=settings.miku_text_lang,
+            cut=settings.miku_cut,
+            speed=settings.tts_speed,
+            hf_token=settings.resolved_hf_token or None,
+        )
     raise ValueError(f"unknown TTS engine: {name!r}")
 
 

@@ -50,8 +50,22 @@ class Settings(BaseSettings):
     tts_cache: bool = True    # cache rendered phrases (helps slow engines like Miku)
 
     # ---- Miku voice (Phase 2) -------------------------------------------
-    miku_space_id: str = ""
-    base_voice_lang: str = "ja"  # "en" or "ja" — RVC input voice
+    # GPT-SoVITS Space that clones a voice from a reference clip. These run on
+    # HF ZeroGPU, so an HF token is REQUIRED to allocate the GPU.
+    miku_space_id: str = "lj1995/GPT-SoVITS-ProPlus"
+    miku_ref_audio: str = ""   # path to a 3-10s clip of the target (Miku) voice
+    miku_ref_text: str = ""    # transcript of the clip (blank = ref-free mode)
+    miku_ref_lang: str = "ja"  # language of the reference clip
+    miku_text_lang: str = "en"  # language FRIDAY speaks
+    miku_cut: str = "punct"    # how GPT-SoVITS splits: punct|none|4sent|50char
+    hf_token: str = ""         # FRIDAY_HF_TOKEN (falls back to HF_TOKEN env)
+    base_voice_lang: str = "ja"  # "en" or "ja" — base TTS voice hint
+
+    @property
+    def resolved_hf_token(self) -> str:
+        import os
+
+        return self.hf_token.strip() or os.environ.get("HF_TOKEN", "").strip()
 
     @property
     def has_api_key(self) -> bool:
