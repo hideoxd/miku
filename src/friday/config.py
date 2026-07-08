@@ -49,6 +49,19 @@ class Settings(BaseSettings):
     tts_min_chars: int = 25   # sentence-chunk threshold before speaking
     tts_cache: bool = True    # cache rendered phrases (helps slow engines like Miku)
 
+    # ---- Voice in (Phase 3) ---------------------------------------------
+    input_device: str = ""            # mic device name/index (empty = default)
+    mic_sample_rate: int = 16_000
+    stt_model: str = "base.en"        # faster-whisper size (tiny.en/base.en/small.en)
+    stt_compute_type: str = "int8"    # int8 is the CPU sweet spot
+    stt_cpu_threads: int = 4          # pin to the P-cores; 0 = library default
+    wake_model: str = "hey_jarvis"    # openWakeWord model name or path to a .onnx
+    wake_threshold: float = 0.5       # 0-1; higher = fewer false wakes
+    vad_threshold: float = 0.5        # silero speech probability threshold
+    vad_silence_ms: int = 800         # trailing silence that ends a turn
+    bargein_ms: int = 350             # speech-while-speaking that triggers barge-in
+    max_utterance_s: float = 15.0     # hard cap on a single spoken turn
+
     # ---- Miku voice (Phase 2) -------------------------------------------
     # Two backends (both run on HF ZeroGPU -> an HF token is REQUIRED):
     #   "mikutts"   text -> Miku directly via a mikuTTS Space (default, no clip)

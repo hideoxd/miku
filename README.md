@@ -25,10 +25,23 @@ stage is behind a `Protocol`, so engines are swappable.
 | Phase | What works | Run |
 |---|---|---|
 | **0** | Text chat + tool-calling brain | `python -m friday.main --text` |
-| 1 | Spoken replies (placeholder voice) | `--ptt` |
-| 2 | Miku voice | (config flag) |
-| 3 | Hands-free wake word + barge-in | `--voice` |
-| 4 | Skills: PC control, web, calendar/email/todos | — |
+| **1** | Spoken replies | `--text --speak` |
+| **2** | Miku voice | `FRIDAY_TTS_ENGINE=miku` |
+| **3** | Push-to-talk / hands-free wake word + barge-in | `--ptt` · `--voice` |
+| 4 | Skills: PC control, web, calendar/email/todos | (function-calling tools) |
+
+### Voice input (Phase 3)
+
+```bash
+pip install faster-whisper openwakeword silero-vad scipy
+python -m friday.main --ptt      # press Enter, speak, hear Miku reply
+python -m friday.main --voice    # say "Hey Jarvis", then speak (barge-in supported)
+```
+
+STT is faster-whisper `base.en` (int8, CPU); endpointing/barge-in use Silero-VAD;
+wake word is openWakeWord (default `hey_jarvis` — a custom "hey friday" needs a
+model trained via openWakeWord's notebook, then set `FRIDAY_WAKE_MODEL`).
+**Use headphones** so the mic doesn't hear Miku.
 
 ## Quick start (Phase 0)
 

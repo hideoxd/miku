@@ -53,6 +53,56 @@ def _build_speaker(settings):
     return speaker
 
 
+def _make_assistant(settings, registry):
+    """Build the Assistant, or None if no API key is configured."""
+    if not settings.has_api_key:
+        return None
+    from .llm.openrouter_llm import OpenRouterEngine
+
+    engine = OpenRouterEngine(settings, dispatch=registry.dispatch)
+    return Assistant(settings, engine, registry)
+
+
+def run_voice_mode(hands_free: bool) -> int:
+    """Push-to-talk (--ptt) or hands-free wake-word loop (--voice)."""
+    settings = get_settings()
+
+    try:
+        speaker = _build_speaker(settings)
+    except Exception as exc:  # noqa: BLE001
+        print(f"[voice output unavailable: {exc}]")
+        return 1
+
+    def announce_timer(msg: str) -> None:
+        try:
+            speaker.say_text(msg)
+        except Exception:  # noqa: BLE001
+            log.exception("failed to speak timer alert")
+
+    registry = build_default_registry(on_timer_fire=announce_timer)
+    assistant = _make_assistant(settings, registry)
+    if assistant is None:
+        print("No OPENROUTER_API_KEY found — add it to .env first.")
+        return 1
+
+    from .stt.faster_whisper_stt import FasterWhisperSTT
+    from .vad import SileroVad
+    from .voice_loop import run_ptt, run_voice
+
+    print("Loading speech models… (first run downloads them)")
+    stt = FasterWhisperSTT(
+        settings.stt_model, settings.stt_compute_type, settings.stt_cpu_threads
+    )
+    vad = SileroVad(threshold=settings.vad_threshold, sample_rate=settings.mic_sample_rate)
+
+    if hands_free:
+        from .wakeword import WakeWord
+
+        wake = WakeWord(settings.wake_model, settings.wake_threshold)
+        return run_voice(settings, assistant, speaker, stt, vad, wake)
+    return run_ptt(settings, assistant, speaker, stt, vad)
+
+
 def run_text_repl(speak: bool = False) -> int:
     settings = get_settings()
 
@@ -83,10 +133,7 @@ def run_text_repl(speak: bool = False) -> int:
         )
         return 1
 
-    from .llm.openrouter_llm import OpenRouterEngine
-
-    engine = OpenRouterEngine(settings, dispatch=registry.dispatch)
-    assistant = Assistant(settings, engine, registry)
+    assistant = _make_assistant(settings, registry)
 
     voice_note = f", voice: {settings.tts_engine}" if speaker else ""
     print(f"{settings.assistant_name} ready (model: {settings.llm_model}{voice_note}).")
@@ -226,6 +273,8 @@ def main(argv: list[str] | None = None) -> int:
         const="Hello, I am FRIDAY. Your voice pipeline is working.",
         help="synthesize a line to cache/tts_selftest.wav (no API key needed)",
     )
+    mode.add_argument("--ptt", action="store_true", help="push-to-talk voice (Enter, then speak)")
+    mode.add_argument("--voice", action="store_true", help="hands-free wake-word voice loop")
     parser.add_argument("--speak", action="store_true", help="speak replies aloud (with --text)")
     parser.add_argument("--play", action="store_true", help="also play audio (with --tts-selftest)")
     args = parser.parse_args(argv)
@@ -238,6 +287,10 @@ def main(argv: list[str] | None = None) -> int:
         return run_selftest()
     if args.tts_selftest is not None:
         return run_tts_selftest(args.tts_selftest, play=args.play)
+    if args.voice:
+        return run_voice_mode(hands_free=True)
+    if args.ptt:
+        return run_voice_mode(hands_free=False)
     return run_text_repl(speak=args.speak)
 
 
