@@ -1,0 +1,26 @@
+# Secrets
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+.pytest_cache/
+
+# Models / caches / logs (large + machine-specific)
+models/
+cache/*.wav
+logs/*.log
+
+# OS
+Thumbs.db
+.DS_Store
+
+# Google/Todoist OAuth tokens (Phase 4)
+token.json
+credentials.json
