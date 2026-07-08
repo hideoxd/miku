@@ -39,8 +39,15 @@ miku = [
 skills = [
     "ddgs>=6.0",
     "AppOpener>=1.7",
+    "pyautogui>=0.9.54",
     "pycaw>=20240210",
     "comtypes>=1.4",
+    "requests>=2.31",
+]
+google = [
+    "google-api-python-client>=2.100",
+    "google-auth-httplib2>=0.2",
+    "google-auth-oauthlib>=1.2",
 ]
 
 [project.scripts]

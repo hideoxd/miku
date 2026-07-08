@@ -85,6 +85,11 @@ class Settings(BaseSettings):
 
     base_voice_lang: str = "ja"  # "en" or "ja" — base TTS voice hint
 
+    # ---- Skills (Phase 4) -----------------------------------------------
+    todoist_token: str = ""   # FRIDAY_TODOIST_TOKEN — enables Todoist skills
+    enable_pc_control: bool = True
+    enable_web_search: bool = True
+
     @property
     def resolved_hf_token(self) -> str:
         import os

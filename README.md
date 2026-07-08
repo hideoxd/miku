@@ -28,7 +28,20 @@ stage is behind a `Protocol`, so engines are swappable.
 | **1** | Spoken replies | `--text --speak` |
 | **2** | Miku voice | `FRIDAY_TTS_ENGINE=miku` |
 | **3** | Push-to-talk / hands-free wake word + barge-in | `--ptt` · `--voice` |
-| 4 | Skills: PC control, web, calendar/email/todos | (function-calling tools) |
+| **4** | Skills: PC control, web, calendar/email/todos | (function-calling tools) |
+
+### Skills (Phase 4)
+
+FRIDAY calls these as tools whenever they help:
+
+- **General chat / Q&A** — just the brain.
+- **PC control** — open apps, open websites, get/set volume, media keys, type text.
+- **Web search** — keyless via DuckDuckGo (`ddgs`).
+- **Productivity** — Todoist (set `FRIDAY_TODOIST_TOKEN`); Google Calendar + Gmail
+  (drop an OAuth `credentials.json` in the repo root — see `.env.example`).
+
+Hard-to-reverse actions (sending email) require an explicit confirmation, and the
+persona is instructed to confirm verbally before doing anything destructive.
 
 ### Voice input (Phase 3)
 
