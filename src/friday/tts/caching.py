@@ -35,6 +35,10 @@ class CachingTTS:
     def sample_rate(self) -> int:
         return self._sr
 
+    @property
+    def prefers_full_text(self) -> bool:
+        return getattr(self.inner, "prefers_full_text", False)
+
     def _key(self, text: str) -> str:
         h = hashlib.sha1(f"{self._tag}|{text}".encode("utf-8")).hexdigest()[:16]
         return h

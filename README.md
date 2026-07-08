@@ -55,8 +55,8 @@ All settings live in `.env` (see `.env.example`). Key ones:
 
 ## Enabling the Miku voice (Phase 2)
 
-FRIDAY clones Miku's voice with **GPT-SoVITS** on a hosted Space — give it a short
-reference clip and it speaks any text in that voice. Nothing heavy runs locally.
+FRIDAY speaks with Hatsune Miku's voice via a hosted **mikuTTS** Space
+(`edge-tts` → RVC). It's **text → Miku directly — no reference clip needed**.
 
 ```bash
 pip install gradio_client
@@ -66,26 +66,32 @@ Then in `.env`:
 
 ```ini
 FRIDAY_TTS_ENGINE=miku
-FRIDAY_MIKU_SPACE_ID=lj1995/GPT-SoVITS-ProPlus
-FRIDAY_HF_TOKEN=hf_xxx           # REQUIRED — these Spaces run on ZeroGPU
-FRIDAY_MIKU_REF_AUDIO=cache/miku_ref.wav   # a 3-10s clean Miku clip (wav or mp3)
-FRIDAY_MIKU_REF_TEXT=            # transcript of the clip (blank = ref-free)
-FRIDAY_MIKU_REF_LANG=ja
+FRIDAY_HF_TOKEN=hf_xxx          # REQUIRED — the Space runs on HF ZeroGPU
+FRIDAY_MIKU_BACKEND=mikutts     # default
+FRIDAY_MIKU_SPACE_ID=John6666/mikuTTS
+FRIDAY_MIKU_MODEL=HATSUNE MIKU  # or MikuAI, "Hatsune Miku V2 - VOCALOID (RVC) 250 Epoch", …
+FRIDAY_MIKU_BASE_VOICE=en-US-AriaNeural-Female
+FRIDAY_MIKU_F0_UP_KEY=6         # raise if Miku sounds too low
 ```
 
-- **HF token:** create a free "read" token at <https://huggingface.co/settings/tokens>.
-  Without it, ZeroGPU refuses the request.
-- **Reference clip:** 3-10 seconds of clean Miku speech. GPT-SoVITS resamples for
-  you, so any wav/mp3 works.
+- **HF token (required):** create a free "read" token at
+  <https://huggingface.co/settings/tokens>. Without it, ZeroGPU refuses the call.
+- **Latency:** ~15–30 s per reply on the free shared GPU (the whole reply is sent
+  in one call; repeated fixed lines are cached and instant). For snappier Miku,
+  duplicate the Space onto dedicated hardware.
 
-Verify it (writes `cache/tts_selftest.wav`, no OpenRouter key needed):
+Verify (writes `cache/tts_selftest.wav`; add `--play` to hear it; no OpenRouter key needed):
 
 ```bash
 python -m friday.main --tts-selftest "Hello, I am Friday." --play
 ```
 
-If the Miku engine can't start (missing clip/token), FRIDAY automatically falls
-back to the offline SAPI voice so it always speaks.
+**Alternative backend** — clone Miku from your own reference clip via GPT-SoVITS:
+set `FRIDAY_MIKU_BACKEND=gptsovits`, `FRIDAY_MIKU_SPACE_ID=lj1995/GPT-SoVITS-ProPlus`,
+and `FRIDAY_MIKU_REF_AUDIO=<a 3-10s clip>`.
+
+If the Miku engine can't start (missing token, Space down), FRIDAY automatically
+falls back to the offline SAPI voice so it always speaks.
 
 ## Legal & privacy
 

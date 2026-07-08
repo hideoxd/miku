@@ -17,6 +17,7 @@ from pathlib import Path
 import numpy as np
 
 from ..audio.playback import read_wav
+from ._spaces import client_auth_kwargs, extract_audio_path
 from .base import TTSEngine  # noqa: F401  (documents the interface we implement)
 
 log = logging.getLogger("friday.tts.miku")
@@ -36,21 +37,10 @@ _CUT = {
 }
 
 
-def _client_auth_kwargs(client_cls, hf_token: str | None) -> dict:
-    """Pass an HF token under whatever keyword this gradio_client version uses."""
-    kwargs: dict = {"verbose": False}
-    if hf_token:
-        import inspect
-
-        params = inspect.signature(client_cls.__init__).parameters
-        if "hf_token" in params:
-            kwargs["hf_token"] = hf_token
-        elif "token" in params:
-            kwargs["token"] = hf_token
-    return kwargs
-
-
 class GptSovitsMikuEngine:
+    # Remote GPU call per request — synthesize the whole reply at once.
+    prefers_full_text = True
+
     def __init__(
         self,
         space_id: str,
@@ -96,7 +86,7 @@ class GptSovitsMikuEngine:
         self.sample_rate = 32_000  # GPT-SoVITS v2/ProPlus output; refined per call
 
         log.info("connecting to GPT-SoVITS Space: %s", space_id)
-        self.client = Client(space_id, **_client_auth_kwargs(Client, hf_token))
+        self.client = Client(space_id, **client_auth_kwargs(Client, hf_token))
 
     def synthesize(self, text: str) -> np.ndarray:
         text = text.strip()
@@ -122,26 +112,10 @@ class GptSovitsMikuEngine:
             api_name="/get_tts_wav",
         )
 
-        wav_path = self._extract_path(result)
+        wav_path = extract_audio_path(result)
         if not wav_path:
             log.warning("GPT-SoVITS returned no audio path: %r", result)
             return np.zeros(0, dtype=np.float32)
         pcm, sr = read_wav(wav_path)
         self.sample_rate = sr
         return pcm
-
-    @staticmethod
-    def _extract_path(result) -> str | None:
-        if isinstance(result, str):
-            return result
-        if isinstance(result, (list, tuple)):
-            for item in result:
-                if isinstance(item, str) and item.lower().endswith((".wav", ".mp3", ".flac")):
-                    return item
-            if result and isinstance(result[0], str):
-                return result[0]
-        if isinstance(result, dict):
-            for key in ("path", "name", "value"):
-                if isinstance(result.get(key), str):
-                    return result[key]
-        return None

@@ -37,18 +37,38 @@ def _create(name: str, settings: Settings) -> TTSEngine:
 
         return PiperEngine(model_path=settings.tts_voice, speed=settings.tts_speed)
     if name == "miku":
-        from .gpt_sovits import GptSovitsMikuEngine
+        token = settings.resolved_hf_token or None
+        backend = (settings.miku_backend or "mikutts").lower()
+        if backend == "mikutts":
+            from .mikutts_space import MikuTTSSpaceEngine
 
-        return GptSovitsMikuEngine(
-            settings.miku_space_id,
-            settings.miku_ref_audio,
-            ref_text=settings.miku_ref_text,
-            ref_lang=settings.miku_ref_lang,
-            text_lang=settings.miku_text_lang,
-            cut=settings.miku_cut,
-            speed=settings.tts_speed,
-            hf_token=settings.resolved_hf_token or None,
-        )
+            return MikuTTSSpaceEngine(
+                settings.miku_space_id or "John6666/mikuTTS",
+                model=settings.miku_model,
+                base_voice=settings.miku_base_voice,
+                f0_up_key=settings.miku_f0_up_key,
+                index_rate=settings.miku_index_rate,
+                hf_token=token,
+            )
+        if backend == "gptsovits":
+            from .gpt_sovits import GptSovitsMikuEngine
+
+            # miku_space_id defaults to the mikutts Space; use the GPT-SoVITS
+            # default unless the user pointed it at a GPT-SoVITS Space.
+            space = settings.miku_space_id
+            if not space or "mikuTTS" in space:
+                space = "lj1995/GPT-SoVITS-ProPlus"
+            return GptSovitsMikuEngine(
+                space,
+                settings.miku_ref_audio,
+                ref_text=settings.miku_ref_text,
+                ref_lang=settings.miku_ref_lang,
+                text_lang=settings.miku_text_lang,
+                cut=settings.miku_cut,
+                speed=settings.tts_speed,
+                hf_token=token,
+            )
+        raise ValueError(f"unknown miku backend: {backend!r}")
     raise ValueError(f"unknown TTS engine: {name!r}")
 
 

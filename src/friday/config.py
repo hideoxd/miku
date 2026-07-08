@@ -50,15 +50,26 @@ class Settings(BaseSettings):
     tts_cache: bool = True    # cache rendered phrases (helps slow engines like Miku)
 
     # ---- Miku voice (Phase 2) -------------------------------------------
-    # GPT-SoVITS Space that clones a voice from a reference clip. These run on
-    # HF ZeroGPU, so an HF token is REQUIRED to allocate the GPU.
-    miku_space_id: str = "lj1995/GPT-SoVITS-ProPlus"
-    miku_ref_audio: str = ""   # path to a 3-10s clip of the target (Miku) voice
+    # Two backends (both run on HF ZeroGPU -> an HF token is REQUIRED):
+    #   "mikutts"   text -> Miku directly via a mikuTTS Space (default, no clip)
+    #   "gptsovits" clone Miku from a reference clip via a GPT-SoVITS Space
+    miku_backend: str = "mikutts"
+    hf_token: str = ""  # FRIDAY_HF_TOKEN (falls back to HF_TOKEN env)
+
+    # -- mikutts backend --
+    miku_space_id: str = "John6666/mikuTTS"
+    miku_model: str = "HATSUNE MIKU"  # which built-in Miku RVC model
+    miku_base_voice: str = "en-US-AriaNeural-Female"  # edge base voice
+    miku_f0_up_key: int = 6  # pitch shift toward Miku's register
+    miku_index_rate: float = 0.75
+
+    # -- gptsovits backend (reference clone) --
+    miku_ref_audio: str = ""   # path to a 3-10s clip of the target voice
     miku_ref_text: str = ""    # transcript of the clip (blank = ref-free mode)
     miku_ref_lang: str = "ja"  # language of the reference clip
     miku_text_lang: str = "en"  # language FRIDAY speaks
     miku_cut: str = "punct"    # how GPT-SoVITS splits: punct|none|4sent|50char
-    hf_token: str = ""         # FRIDAY_HF_TOKEN (falls back to HF_TOKEN env)
+
     base_voice_lang: str = "ja"  # "en" or "ja" — base TTS voice hint
 
     @property

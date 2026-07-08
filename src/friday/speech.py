@@ -59,8 +59,15 @@ class Speaker:
         self.on_tool = on_tool
 
     def speak_events(self, events: Iterable[StreamEvent]) -> TurnTiming:
-        """Consume a reply stream, speaking sentences as they complete."""
+        """Consume a reply stream and speak it.
+
+        Fast local engines speak sentence-by-sentence as they stream in. Remote
+        engines that set ``prefers_full_text`` (Miku/GPT-SoVITS — each call has a
+        large GPU-allocation cost) buffer the whole reply and synthesize once.
+        """
+        full_text = getattr(self.tts, "prefers_full_text", False)
         chunker = SentenceChunker(self.min_chars)
+        buffer: list[str] = []
         timing = TurnTiming()
         t0 = time.perf_counter()
 
@@ -70,15 +77,18 @@ class Speaker:
                     timing.first_token_s = time.perf_counter() - t0
                 if self.on_text:
                     self.on_text(event.text)
-                for sentence in chunker.feed(event.text):
-                    self._say(sentence, timing, t0)
+                if full_text:
+                    buffer.append(event.text)
+                else:
+                    for sentence in chunker.feed(event.text):
+                        self._say(sentence, timing, t0)
             elif isinstance(event, ToolActivity):
                 # Nothing spoken; surface tool use to the console/logs.
                 log.debug("tool activity: %s", event.name)
                 if self.on_tool:
                     self.on_tool(event.name)
 
-        tail = chunker.flush()
+        tail = "".join(buffer).strip() if full_text else chunker.flush()
         if tail:
             self._say(tail, timing, t0)
 
