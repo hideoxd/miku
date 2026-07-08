@@ -16,12 +16,15 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# Phase 1+ audio stack (installed later; kept optional so Phase 0 stays lightweight)
+# Phase 1 audio-out core (playback + the offline SAPI voice).
 voice = [
     "sounddevice>=0.4.7",
     "numpy>=1.26",
-    "soundfile>=0.12",
+    "comtypes>=1.4; sys_platform == 'win32'",
 ]
+# Optional TTS engines (quality upgrades over SAPI).
+tts-edge = ["edge-tts>=6.1", "miniaudio>=1.59"]
+tts-piper = ["piper-tts>=1.2"]
 # Phase 3 speech-in
 stt = [
     "faster-whisper>=1.0",

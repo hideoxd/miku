@@ -33,12 +33,20 @@ class Settings(BaseSettings):
     app_url: str = "https://github.com/forloopcodes/friday"
     app_title: str = "FRIDAY"
     llm_temperature: float = 0.6
+    llm_max_tokens: int = 800  # spoken replies are short; also caps cost/credits
     max_tool_rounds: int = 6  # safety cap on the tool-call loop
 
     # ---- Persona / behaviour --------------------------------------------
     assistant_name: str = "FRIDAY"
     wake_word: str = "hey friday"
     log_level: str = "INFO"
+
+    # ---- Voice out (Phase 1) --------------------------------------------
+    tts_engine: str = "sapi"  # sapi | edge | piper | kokoro
+    tts_voice: str = ""       # engine-specific voice id / model path (empty = default)
+    tts_speed: float = 1.0    # 1.0 = normal
+    output_device: str = ""   # sounddevice device name or index (empty = system default)
+    tts_min_chars: int = 25   # sentence-chunk threshold before speaking
 
     # ---- Miku voice (Phase 2) -------------------------------------------
     miku_space_id: str = ""

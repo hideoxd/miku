@@ -96,6 +96,7 @@ class OpenRouterEngine(LLMEngine):
             model=self.settings.llm_model,
             messages=convo,
             temperature=self.settings.llm_temperature,
+            max_tokens=self.settings.llm_max_tokens,
             stream=True,
         )
         if tools:

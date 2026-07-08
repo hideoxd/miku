@@ -1,1 +1,57 @@
-"""Text-to-speech engines (Phase 1) + Miku voice conversion (Phase 2)."""
+"""Text-to-speech engines (Phase 1) + Miku voice conversion (Phase 2).
+
+``build_tts_engine`` picks the configured engine and always falls back to the
+offline SAPI voice so FRIDAY can still speak if an optional engine or its deps
+are missing.
+"""
+
+from __future__ import annotations
+
+import logging
+
+from ..config import Settings
+from .base import TTSEngine
+
+log = logging.getLogger("friday.tts")
+
+__all__ = ["TTSEngine", "build_tts_engine"]
+
+
+def _create(name: str, settings: Settings) -> TTSEngine:
+    name = name.lower()
+    if name == "sapi":
+        from .sapi_tts import SapiEngine
+
+        return SapiEngine(voice=settings.tts_voice, speed=settings.tts_speed)
+    if name == "edge":
+        from .edge_tts import EdgeEngine
+
+        return EdgeEngine(
+            voice=settings.tts_voice, speed=settings.tts_speed, lang=settings.base_voice_lang
+        )
+    if name == "piper":
+        from .piper_tts import PiperEngine
+
+        return PiperEngine(model_path=settings.tts_voice, speed=settings.tts_speed)
+    raise ValueError(f"unknown TTS engine: {name!r}")
+
+
+def build_tts_engine(settings: Settings) -> TTSEngine:
+    """Build the requested engine, falling back to SAPI on any failure."""
+    requested = (settings.tts_engine or "sapi").lower()
+    order = [requested] + (["sapi"] if requested != "sapi" else [])
+
+    errors: list[str] = []
+    for name in order:
+        try:
+            engine = _create(name, settings)
+            if name != requested:
+                log.warning("using fallback TTS engine '%s' (requested '%s')", name, requested)
+            else:
+                log.info("TTS engine: %s (%d Hz)", name, engine.sample_rate)
+            return engine
+        except Exception as exc:  # noqa: BLE001
+            errors.append(f"{name}: {exc}")
+            log.warning("TTS engine '%s' unavailable: %s", name, exc)
+
+    raise RuntimeError("no TTS engine available — " + "; ".join(errors))

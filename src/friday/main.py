@@ -35,14 +35,44 @@ def _enable_utf8() -> None:
                 pass
 
 
-def _announce_timer(msg: str) -> None:
-    # Phase 0: just surface it. Phase 1+ routes this through TTS.
-    print(f"\n\a[FRIDAY] {msg}")
+def _build_speaker(settings):
+    """Build the TTS + player + Speaker, or return None if audio is unavailable."""
+    from .audio.playback import AudioPlayer
+    from .speech import Speaker
+    from .tts import build_tts_engine
+
+    tts = build_tts_engine(settings)
+    player = AudioPlayer(device=settings.output_device)
+    speaker = Speaker(
+        tts,
+        player,
+        min_chars=settings.tts_min_chars,
+        on_text=lambda t: print(t, end="", flush=True),
+        on_tool=lambda name: print(f"\n  … using {name}\n  ", end="", flush=True),
+    )
+    return speaker
 
 
-def run_text_repl() -> int:
+def run_text_repl(speak: bool = False) -> int:
     settings = get_settings()
-    registry = build_default_registry(on_timer_fire=_announce_timer)
+
+    speaker = None
+    if speak:
+        try:
+            speaker = _build_speaker(settings)
+        except Exception as exc:  # noqa: BLE001
+            log.warning("voice output disabled: %s", exc)
+            print(f"[voice output unavailable: {exc}] — continuing in text-only mode.\n")
+
+    def announce_timer(msg: str) -> None:
+        print(f"\n\a[{settings.assistant_name}] {msg}")
+        if speaker is not None:
+            try:
+                speaker.say_text(msg)
+            except Exception:  # noqa: BLE001
+                log.exception("failed to speak timer alert")
+
+    registry = build_default_registry(on_timer_fire=announce_timer)
 
     if not settings.has_api_key:
         print(
@@ -58,7 +88,8 @@ def run_text_repl() -> int:
     engine = OpenRouterEngine(settings, dispatch=registry.dispatch)
     assistant = Assistant(settings, engine, registry)
 
-    print(f"{settings.assistant_name} ready (model: {settings.llm_model}).")
+    voice_note = f", voice: {settings.tts_engine}" if speaker else ""
+    print(f"{settings.assistant_name} ready (model: {settings.llm_model}{voice_note}).")
     print("Type your message. Commands: /reset, /quit\n")
 
     while True:
@@ -78,17 +109,67 @@ def run_text_repl() -> int:
 
         print(f"{settings.assistant_name.lower()} › ", end="", flush=True)
         try:
-            for event in assistant.ask(user):
-                if isinstance(event, TextDelta):
-                    print(event.text, end="", flush=True)
-                elif isinstance(event, ToolActivity):
-                    print(f"\n  … using {event.name}\n  ", end="", flush=True)
+            if speaker is not None:
+                speaker.speak_events(assistant.ask(user))
+            else:
+                for event in assistant.ask(user):
+                    if isinstance(event, TextDelta):
+                        print(event.text, end="", flush=True)
+                    elif isinstance(event, ToolActivity):
+                        print(f"\n  … using {event.name}\n  ", end="", flush=True)
         except Exception as exc:  # noqa: BLE001
             log.exception("turn failed")
             print(f"\n[error: {exc}]")
         print("\n")
 
     print("Goodbye.")
+    return 0
+
+
+def run_tts_selftest(text: str, play: bool) -> int:
+    """Synthesize a line to a WAV (and optionally play it). No API key needed."""
+    from .audio.playback import write_wav
+    from .config import ROOT
+    from .tts import build_tts_engine
+
+    settings = get_settings()
+    print(f"TTS engine: {settings.tts_engine} (voice: {settings.tts_voice or 'default'})")
+    engine = build_tts_engine(settings)
+
+    import time
+
+    t0 = time.perf_counter()
+    pcm = engine.synthesize(text)
+    dt = time.perf_counter() - t0
+
+    if pcm is None or len(pcm) == 0:
+        print("FAIL: engine returned no audio.")
+        return 1
+
+    duration = len(pcm) / engine.sample_rate
+    out_dir = ROOT / "cache"
+    out_dir.mkdir(exist_ok=True)
+    out = out_dir / "tts_selftest.wav"
+    write_wav(str(out), pcm, engine.sample_rate)
+    rtf = dt / duration if duration else float("inf")
+    print(
+        f"synthesized {len(pcm)} samples · {duration:.2f}s audio @ {engine.sample_rate} Hz · "
+        f"synth {dt:.2f}s (RTF {rtf:.2f})"
+    )
+    print(f"wrote {out}")
+
+    if play:
+        try:
+            from .audio.playback import AudioPlayer
+
+            player = AudioPlayer(device=settings.output_device)
+            print("playing… (you should hear it)")
+            player.enqueue(pcm, engine.sample_rate)
+            player.wait_done()
+        except Exception as exc:  # noqa: BLE001
+            print(f"[playback unavailable: {exc}] — the WAV is still on disk.")
+
+    print("tts-selftest: PASS")
     return 0
 
 
@@ -138,6 +219,15 @@ def main(argv: list[str] | None = None) -> int:
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--text", action="store_true", help="interactive text chat (default)")
     mode.add_argument("--selftest", action="store_true", help="offline tools/chunker check")
+    mode.add_argument(
+        "--tts-selftest",
+        metavar="TEXT",
+        nargs="?",
+        const="Hello, I am FRIDAY. Your voice pipeline is working.",
+        help="synthesize a line to cache/tts_selftest.wav (no API key needed)",
+    )
+    parser.add_argument("--speak", action="store_true", help="speak replies aloud (with --text)")
+    parser.add_argument("--play", action="store_true", help="also play audio (with --tts-selftest)")
     args = parser.parse_args(argv)
 
     _enable_utf8()
@@ -146,7 +236,9 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.selftest:
         return run_selftest()
-    return run_text_repl()
+    if args.tts_selftest is not None:
+        return run_tts_selftest(args.tts_selftest, play=args.play)
+    return run_text_repl(speak=args.speak)
 
 
 if __name__ == "__main__":
