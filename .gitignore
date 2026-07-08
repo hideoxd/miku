@@ -14,7 +14,7 @@ venv/
 
 # Models / caches / logs (large + machine-specific)
 models/
-cache/*.wav
+cache/
 logs/*.log
 
 # OS

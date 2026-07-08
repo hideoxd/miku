@@ -120,3 +120,15 @@ def write_wav(path: str, pcm: np.ndarray, sample_rate: int) -> None:
         w.setsampwidth(2)
         w.setframerate(sample_rate)
         w.writeframes(i16.tobytes())
+
+
+def read_wav(path: str) -> tuple[np.ndarray, int]:
+    """Read a WAV into a mono float32 buffer + its sample rate."""
+    with wave.open(path, "rb") as w:
+        sr = w.getframerate()
+        channels = w.getnchannels()
+        raw = w.readframes(w.getnframes())
+    data = np.frombuffer(raw, dtype=np.int16).astype(np.float32) / 32768.0
+    if channels > 1:
+        data = data.reshape(-1, channels).mean(axis=1)
+    return data, sr

@@ -9,12 +9,15 @@ from __future__ import annotations
 
 import logging
 
-from ..config import Settings
+from ..config import ROOT, Settings
 from .base import TTSEngine
 
 log = logging.getLogger("friday.tts")
 
 __all__ = ["TTSEngine", "build_tts_engine"]
+
+# Engines slow enough to benefit from phrase caching (network / GPU round-trips).
+_CACHEABLE = {"edge", "piper", "kokoro", "miku"}
 
 
 def _create(name: str, settings: Settings) -> TTSEngine:
@@ -49,6 +52,13 @@ def build_tts_engine(settings: Settings) -> TTSEngine:
                 log.warning("using fallback TTS engine '%s' (requested '%s')", name, requested)
             else:
                 log.info("TTS engine: %s (%d Hz)", name, engine.sample_rate)
+            if settings.tts_cache and name in _CACHEABLE:
+                from .caching import CachingTTS
+
+                engine = CachingTTS(
+                    engine, ROOT / "cache" / "tts", tag=f"{name}:{settings.tts_voice}"
+                )
+                log.info("phrase caching enabled for '%s'", name)
             return engine
         except Exception as exc:  # noqa: BLE001
             errors.append(f"{name}: {exc}")

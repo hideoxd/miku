@@ -47,6 +47,7 @@ class Settings(BaseSettings):
     tts_speed: float = 1.0    # 1.0 = normal
     output_device: str = ""   # sounddevice device name or index (empty = system default)
     tts_min_chars: int = 25   # sentence-chunk threshold before speaking
+    tts_cache: bool = True    # cache rendered phrases (helps slow engines like Miku)
 
     # ---- Miku voice (Phase 2) -------------------------------------------
     miku_space_id: str = ""
