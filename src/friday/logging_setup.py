@@ -33,9 +33,14 @@ def setup_logging(level: str = "INFO") -> None:
     root = logging.getLogger()
     root.setLevel(getattr(logging, level.upper(), logging.INFO))
 
-    console = logging.StreamHandler()
-    console.setFormatter(fmt)
-    root.addHandler(console)
+    # Under pythonw (tray/background) there is no console — sys.stderr is None,
+    # so only attach a stream handler when one actually exists.
+    import sys
+
+    if sys.stderr is not None:
+        console = logging.StreamHandler()
+        console.setFormatter(fmt)
+        root.addHandler(console)
 
     fileh = RotatingFileHandler(
         logs_dir / "friday.log", maxBytes=2_000_000, backupCount=3, encoding="utf-8"

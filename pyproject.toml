@@ -49,9 +49,18 @@ google = [
     "google-auth-httplib2>=0.2",
     "google-auth-oauthlib>=1.2",
 ]
+# Phase 5 background service / system tray
+tray = [
+    "pystray>=0.19",
+    "pillow>=10",
+    "pywin32>=306; sys_platform == 'win32'",
+]
 
 [project.scripts]
 friday = "friday.main:main"
+
+[project.gui-scripts]
+friday-tray = "friday.tray:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

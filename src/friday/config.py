@@ -90,6 +90,10 @@ class Settings(BaseSettings):
     enable_pc_control: bool = True
     enable_web_search: bool = True
 
+    # ---- Background service / tray (Phase 5) ----------------------------
+    startup_greeting: bool = False   # speak a short line when the service starts
+    tray_notifications: bool = True  # show tray balloon on wake / errors
+
     @property
     def resolved_hf_token(self) -> str:
         import os

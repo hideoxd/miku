@@ -66,7 +66,30 @@ def _make_assistant(settings, registry):
 def run_voice_mode(hands_free: bool) -> int:
     """Push-to-talk (--ptt) or hands-free wake-word loop (--voice)."""
     settings = get_settings()
+    if not settings.has_api_key:
+        print("No OPENROUTER_API_KEY found — add it to .env first.")
+        return 1
 
+    if hands_free:
+        from .service import VoiceService
+
+        print("Loading… once ready, say the wake word then speak. Ctrl+C to quit.")
+        service = VoiceService(
+            settings,
+            verbose=True,
+            on_event=lambda kind, msg: print(f"  [{msg}]"),
+        )
+        service.start()
+        try:
+            while service._thread and service._thread.is_alive():
+                service.join(0.5)
+        except KeyboardInterrupt:
+            print("\n(stopping)")
+            service.stop()
+            service.join(5)
+        return 0
+
+    # Push-to-talk path
     try:
         speaker = _build_speaker(settings)
     except Exception as exc:  # noqa: BLE001
@@ -81,26 +104,34 @@ def run_voice_mode(hands_free: bool) -> int:
 
     registry = build_default_registry(on_timer_fire=announce_timer)
     assistant = _make_assistant(settings, registry)
-    if assistant is None:
-        print("No OPENROUTER_API_KEY found — add it to .env first.")
-        return 1
 
     from .stt.faster_whisper_stt import FasterWhisperSTT
     from .vad import SileroVad
-    from .voice_loop import run_ptt, run_voice
+    from .voice_loop import run_ptt
 
     print("Loading speech models… (first run downloads them)")
     stt = FasterWhisperSTT(
         settings.stt_model, settings.stt_compute_type, settings.stt_cpu_threads
     )
     vad = SileroVad(threshold=settings.vad_threshold, sample_rate=settings.mic_sample_rate)
-
-    if hands_free:
-        from .wakeword import WakeWord
-
-        wake = WakeWord(settings.wake_model, settings.wake_threshold)
-        return run_voice(settings, assistant, speaker, stt, vad, wake)
     return run_ptt(settings, assistant, speaker, stt, vad)
+
+
+def run_autostart(action: str) -> int:
+    from . import autostart
+
+    if action == "install":
+        path = autostart.install()
+        print(f"Auto-start installed — FRIDAY will launch hidden at every login.\n  {path}")
+    elif action == "uninstall":
+        removed = autostart.uninstall()
+        print("Auto-start removed." if removed else "Auto-start was not installed.")
+    else:  # status
+        st = autostart.status()
+        print(f"Auto-start installed: {st['installed']}")
+        print(f"  launcher: {st['launcher']}")
+        print(f"  runs:     {st['pythonw']} -m friday.tray  (cwd {st['cwd']})")
+    return 0
 
 
 def run_text_repl(speak: bool = False) -> int:
@@ -275,6 +306,10 @@ def main(argv: list[str] | None = None) -> int:
     )
     mode.add_argument("--ptt", action="store_true", help="push-to-talk voice (Enter, then speak)")
     mode.add_argument("--voice", action="store_true", help="hands-free wake-word voice loop")
+    mode.add_argument("--tray", action="store_true", help="run hidden in the system tray")
+    mode.add_argument("--install-autostart", action="store_true", help="launch FRIDAY at login")
+    mode.add_argument("--uninstall-autostart", action="store_true", help="stop launching at login")
+    mode.add_argument("--autostart-status", action="store_true", help="show auto-start status")
     parser.add_argument("--speak", action="store_true", help="speak replies aloud (with --text)")
     parser.add_argument("--play", action="store_true", help="also play audio (with --tts-selftest)")
     args = parser.parse_args(argv)
@@ -287,6 +322,16 @@ def main(argv: list[str] | None = None) -> int:
         return run_selftest()
     if args.tts_selftest is not None:
         return run_tts_selftest(args.tts_selftest, play=args.play)
+    if args.tray:
+        from .tray import main as tray_main
+
+        return tray_main()
+    if args.install_autostart:
+        return run_autostart("install")
+    if args.uninstall_autostart:
+        return run_autostart("uninstall")
+    if args.autostart_status:
+        return run_autostart("status")
     if args.voice:
         return run_voice_mode(hands_free=True)
     if args.ptt:

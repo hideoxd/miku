@@ -29,6 +29,7 @@ stage is behind a `Protocol`, so engines are swappable.
 | **2** | Miku voice | `FRIDAY_TTS_ENGINE=miku` |
 | **3** | Push-to-talk / hands-free wake word + barge-in | `--ptt` · `--voice` |
 | **4** | Skills: PC control, web, calendar/email/todos | (function-calling tools) |
+| **5** | Always-on background service + system tray + auto-start | `--tray` · `--install-autostart` |
 
 ### Skills (Phase 4)
 
@@ -69,6 +70,33 @@ python -m friday.main --text        # chat (needs the key)
 ```
 
 Try: *"what time is it?"* and *"set a 10 second timer called tea"*.
+
+## Run 24/7 in the background (system tray + auto-start)
+
+FRIDAY can run hidden in the background with a **system-tray icon**, listening
+for the wake word all the time, and start itself at every login.
+
+```bash
+pip install pystray pillow pywin32
+python -m friday.main --tray               # run hidden now (tray icon appears)
+python -m friday.main --install-autostart  # launch hidden at every login
+python -m friday.main --autostart-status   # check
+python -m friday.main --uninstall-autostart
+```
+
+The tray icon's **colour shows state** (teal = idle/listening, amber = thinking,
+blue = speaking, grey = paused, red = error). **Right-click** for the menu:
+
+- **Pause / Resume listening** — mutes the mic without quitting (privacy).
+- **Open logs**, **Restart**, **Start at login** (toggle), **Quit**.
+
+Auto-start drops a tiny hidden launcher (`FRIDAY.vbs` → `pythonw -m friday.tray`)
+into your Startup folder — no console window, no admin, easy to remove. The
+service is single-instance and self-healing: a bad turn (network/mic glitch) is
+logged and skipped, and the mic stream auto-restarts, so it survives long uptimes.
+
+> On an 8 GB machine it holds ~1–2 GB resident (Whisper + ONNX). Use **Pause** or
+> `--uninstall-autostart` to stop it.
 
 ## Configuration
 
