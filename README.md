@@ -41,13 +41,17 @@ reacting as she listens (teal), thinks, and speaks (mouth moves), then slides aw
   `miku`) by transcribing short speech windows — no model training. You can say it
   in one breath: *"Hi Miku, what's the weather?"* Set `FRIDAY_WAKE_MODE=openwakeword`
   for the cheaper pretrained "Hey Jarvis" detector instead.
-- **Mascot** — a **3D-rendered Miku** (`assets/miku.png`) shown as a click-through,
-  always-on-top overlay that slides up from the corner with a gentle breathing/nod
-  animation. It runs as its own small process (so it never blocks the assistant),
-  and falls back to a PIL-drawn chibi if the asset is missing. Toggle with
+- **Mascot** — a **3D Miku** (`assets/miku.png`, rendered from a `.glb` model)
+  shown as a click-through, always-on-top overlay. On wake she **jumps/pops up**
+  from the corner (springy overshoot + grow-in), then breathes/nods while active
+  and drops away when done. Runs as its own small process (never blocks the
+  assistant); falls back to a PIL-drawn chibi if the asset is missing. Toggle with
   `FRIDAY_ENABLE_OVERLAY`, resize with `FRIDAY_OVERLAY_SIZE`, move with
-  `FRIDAY_OVERLAY_CORNER` (`bottom-right` / `bottom-left`). To swap the character,
-  drop your own transparent PNG at `src/friday/assets/miku.png`.
+  `FRIDAY_OVERLAY_CORNER`.
+  - **Use your own 3D model:** `pip install trimesh "pyglet<2"` then
+    `python scripts/render_mascot.py path\to\model.glb --az 25` — it renders the
+    model, removes the background, and saves the mascot asset. Or just drop any
+    transparent PNG at `src/friday/assets/miku.png`.
 
 ### Skills (Phase 4)
 

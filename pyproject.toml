@@ -55,6 +55,11 @@ tray = [
     "pillow>=10",
     "pywin32>=306; sys_platform == 'win32'",
 ]
+# Re-rendering the 3D mascot from a .glb/.gltf model (scripts/render_mascot.py)
+mascot = [
+    "trimesh>=4.0",
+    "pyglet<2",
+]
 
 [project.scripts]
 friday = "friday.main:main"

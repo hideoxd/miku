@@ -185,6 +185,25 @@ def _keyed_from_rgba(img, threshold: int = 110):
 
 
 # --------------------------------------------------------------------------- process
+def _ease_out_back(t: float) -> float:
+    """Overshoots past 1 then settles — a springy 'pop'."""
+    c1 = 1.70158
+    c3 = c1 + 1
+    return 1 + c3 * (t - 1) ** 3 + c1 * (t - 1) ** 2
+
+
+def _scale_keyed(asset_rgba, canvas_size, scale: float):
+    """Scale the RGBA asset, centre it on a canvas of `canvas_size`, colour-key it."""
+    from PIL import Image
+
+    w, h = canvas_size
+    sw, sh = max(1, int(asset_rgba.width * scale)), max(1, int(asset_rgba.height * scale))
+    scaled = asset_rgba.resize((sw, sh), Image.LANCZOS)
+    canvas = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+    canvas.alpha_composite(scaled, ((w - sw) // 2, (h - sh) // 2))
+    return _keyed_from_rgba(canvas)
+
+
 def _run_process(size: int, corner: str) -> int:
     import math
     import queue
@@ -214,39 +233,43 @@ def _run_process(size: int, corner: str) -> int:
         pass
     root.configure(bg=key_hex)
 
-    # Prefer the 3D render; fall back to the drawn chibi.
+    # Prefer the 3D render; fall back to the drawn chibi. `POP` scales are the
+    # grow-in "pop" frames; the base frame is scale 1.0 (index -1).
+    POP = [0.55, 0.7, 0.82, 0.92, 1.0]
     asset = _asset_image(size)
     if asset is not None:
-        photo = ImageTk.PhotoImage(_keyed_from_rgba(asset))
-        frames = {k: photo for k in ("idle", "listening", "thinking", "speaking")}
         img_w, img_h = asset.size
+        pop_frames = [ImageTk.PhotoImage(_scale_keyed(asset, (img_w, img_h), s)) for s in POP]
+        state_frames = {k: pop_frames[-1] for k in ("idle", "listening", "thinking", "speaking")}
         animate_mouth = False
     else:
-        frames = {
-            "idle": ImageTk.PhotoImage(_to_keyed(draw_miku(size, "idle"))),
-            "listening": ImageTk.PhotoImage(_to_keyed(draw_miku(size, "listening"))),
-            "thinking": ImageTk.PhotoImage(_to_keyed(draw_miku(size, "thinking"))),
+        img_w = img_h = size
+        drawn = {st: draw_miku(size, st) for st in ("idle", "listening", "thinking")}
+        pop_frames = [ImageTk.PhotoImage(_scale_keyed(drawn["idle"], (img_w, img_h), s)) for s in POP]
+        state_frames = {
+            "idle": ImageTk.PhotoImage(_to_keyed(drawn["idle"])),
+            "listening": ImageTk.PhotoImage(_to_keyed(drawn["listening"])),
+            "thinking": ImageTk.PhotoImage(_to_keyed(drawn["thinking"])),
             "speak_open": ImageTk.PhotoImage(_to_keyed(draw_miku(size, "speaking", True))),
             "speak_closed": ImageTk.PhotoImage(_to_keyed(draw_miku(size, "speaking", False))),
         }
-        img_w = img_h = size
         animate_mouth = True
 
     sw, sh = root.winfo_screenwidth(), root.winfo_screenheight()
     margin = 24
     x = margin if "left" in corner else sw - img_w - margin
     shown_y = sh - int(img_h * 0.82)  # peek: lower body clipped by the screen edge
-    hidden_y = sh + 20
-    cur = {"y": hidden_y}
+    hidden_y = sh + 40
     root.geometry(f"{img_w}x{img_h}+{x}+{hidden_y}")
 
     label = tk.Label(root, bg=key_hex, bd=0, highlightthickness=0)
     label.pack()
-    label.configure(image=frames["idle"])
+    label.configure(image=state_frames["idle"])
     root.withdraw()
     _make_clickthrough(root)
 
-    st = {"name": "idle", "visible": False, "tick": 0}
+    JUMP = 15  # ticks (~0.5s) for the jump/pop
+    st = {"name": "idle", "mode": "hidden", "tick": 0, "jump": 0, "y": hidden_y}
 
     def tick() -> None:
         try:
@@ -257,39 +280,48 @@ def _run_process(size: int, corner: str) -> int:
                 verb, arg = parts[0], (parts[1] if len(parts) > 1 else "")
                 if verb == "show":
                     st["name"] = arg or "listening"
-                    st["visible"] = True
-                    root.deiconify()
-                    root.lift()
+                    if st["mode"] in ("hidden", "hiding"):
+                        st["mode"] = "jumping"
+                        st["jump"] = 0
+                        root.deiconify()
+                        root.lift()
                 elif verb == "state":
                     st["name"] = arg or st["name"]
                 elif verb == "hide":
-                    st["visible"] = False
+                    if st["mode"] != "hidden":
+                        st["mode"] = "hiding"
                 elif verb == "stop":
                     root.destroy()
                     return
         except queue.Empty:
             pass
 
-        target = shown_y if st["visible"] else hidden_y
-        if cur["y"] != target:
-            step = max(9, int(abs(target - cur["y"]) * 0.25))
-            cur["y"] += step if target > cur["y"] else -step
-            if abs(cur["y"] - target) < step:
-                cur["y"] = target
-            if not st["visible"] and cur["y"] == hidden_y:
+        frame = state_frames.get(st["name"], state_frames["idle"])
+
+        if st["mode"] == "jumping":
+            st["jump"] += 1
+            t = min(1.0, st["jump"] / JUMP)
+            st["y"] = int(hidden_y + (shown_y - hidden_y) * _ease_out_back(t))
+            # grow-in pop: pick a POP frame for the first ~60% of the jump
+            pi = min(len(pop_frames) - 1, int(t / 0.6 * (len(pop_frames) - 1)))
+            frame = pop_frames[pi]
+            if st["jump"] >= JUMP:
+                st["mode"] = "shown"
+                st["y"] = shown_y
+        elif st["mode"] == "shown":
+            amp, freq = (7, 0.34) if st["name"] == "speaking" else (3, 0.10)
+            st["y"] = shown_y + int(amp * math.sin(st["tick"] * freq))
+            if animate_mouth and st["name"] == "speaking":
+                frame = state_frames["speak_open"] if (st["tick"] // 6) % 2 == 0 else state_frames["speak_closed"]
+        elif st["mode"] == "hiding":
+            st["y"] += max(24, int((hidden_y - st["y"]) * 0.3))
+            if st["y"] >= hidden_y:
+                st["y"] = hidden_y
+                st["mode"] = "hidden"
                 root.withdraw()
 
-        # gentle idle "breathing" bob; livelier nod while speaking
-        amp, freq = (7, 0.34) if st["name"] == "speaking" else (3, 0.10)
-        bob = int(amp * math.sin(st["tick"] * freq)) if st["visible"] else 0
-        root.geometry(f"{img_w}x{img_h}+{x}+{cur['y'] + bob}")
-
-        name = st["name"]
-        if animate_mouth and name == "speaking":
-            img = frames["speak_open"] if (st["tick"] // 6) % 2 == 0 else frames["speak_closed"]
-        else:
-            img = frames.get(name, frames["idle"])
-        label.configure(image=img)
+        root.geometry(f"{img_w}x{img_h}+{x}+{st['y']}")
+        label.configure(image=frame)
         st["tick"] += 1
         root.after(33, tick)
 
