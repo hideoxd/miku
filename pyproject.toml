@@ -66,4 +66,4 @@ friday-tray = "friday.tray:main"
 where = ["src"]
 
 [tool.setuptools.package-data]
-friday = ["prompts/*.txt"]
+friday = ["prompts/*.txt", "assets/*.png"]

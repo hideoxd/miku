@@ -41,10 +41,13 @@ reacting as she listens (teal), thinks, and speaks (mouth moves), then slides aw
   `miku`) by transcribing short speech windows — no model training. You can say it
   in one breath: *"Hi Miku, what's the weather?"* Set `FRIDAY_WAKE_MODE=openwakeword`
   for the cheaper pretrained "Hey Jarvis" detector instead.
-- **Mascot** — a click-through, always-on-top overlay drawn with PIL, running as
-  its own small process (so it never blocks the assistant). Toggle with
+- **Mascot** — a **3D-rendered Miku** (`assets/miku.png`) shown as a click-through,
+  always-on-top overlay that slides up from the corner with a gentle breathing/nod
+  animation. It runs as its own small process (so it never blocks the assistant),
+  and falls back to a PIL-drawn chibi if the asset is missing. Toggle with
   `FRIDAY_ENABLE_OVERLAY`, resize with `FRIDAY_OVERLAY_SIZE`, move with
-  `FRIDAY_OVERLAY_CORNER` (`bottom-right` / `bottom-left`).
+  `FRIDAY_OVERLAY_CORNER` (`bottom-right` / `bottom-left`). To swap the character,
+  drop your own transparent PNG at `src/friday/assets/miku.png`.
 
 ### Skills (Phase 4)
 

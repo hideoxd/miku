@@ -156,8 +156,37 @@ class OverlayClient:
                 self._proc.terminate()
 
 
+# --------------------------------------------------------------------------- assets
+def _asset_image(size: int):
+    """Load the 3D Miku render (assets/miku.png), tight-cropped + width-scaled."""
+    from PIL import Image
+
+    p = Path(__file__).parent / "assets" / "miku.png"
+    if not p.exists():
+        return None
+    try:
+        im = Image.open(p).convert("RGBA")
+        im = im.crop(im.getchannel("A").getbbox())
+        h = int(im.height * size / im.width)
+        return im.resize((size, h), Image.LANCZOS)
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _keyed_from_rgba(img, threshold: int = 110):
+    """RGBA -> RGB with transparent areas set to the colour-key (clean edges,
+    no magenta fringe: kept pixels retain their original colour)."""
+    from PIL import Image
+
+    mask = img.getchannel("A").point(lambda v: 255 if v >= threshold else 0)
+    out = Image.new("RGB", img.size, KEY)
+    out.paste(img.convert("RGB"), (0, 0), mask)
+    return out
+
+
 # --------------------------------------------------------------------------- process
 def _run_process(size: int, corner: str) -> int:
+    import math
     import queue
     import tkinter as tk
 
@@ -185,21 +214,32 @@ def _run_process(size: int, corner: str) -> int:
         pass
     root.configure(bg=key_hex)
 
+    # Prefer the 3D render; fall back to the drawn chibi.
+    asset = _asset_image(size)
+    if asset is not None:
+        photo = ImageTk.PhotoImage(_keyed_from_rgba(asset))
+        frames = {k: photo for k in ("idle", "listening", "thinking", "speaking")}
+        img_w, img_h = asset.size
+        animate_mouth = False
+    else:
+        frames = {
+            "idle": ImageTk.PhotoImage(_to_keyed(draw_miku(size, "idle"))),
+            "listening": ImageTk.PhotoImage(_to_keyed(draw_miku(size, "listening"))),
+            "thinking": ImageTk.PhotoImage(_to_keyed(draw_miku(size, "thinking"))),
+            "speak_open": ImageTk.PhotoImage(_to_keyed(draw_miku(size, "speaking", True))),
+            "speak_closed": ImageTk.PhotoImage(_to_keyed(draw_miku(size, "speaking", False))),
+        }
+        img_w = img_h = size
+        animate_mouth = True
+
     sw, sh = root.winfo_screenwidth(), root.winfo_screenheight()
-    margin = 30
-    x = margin if "left" in corner else sw - size - margin
-    shown_y = sh - size + 30
+    margin = 24
+    x = margin if "left" in corner else sw - img_w - margin
+    shown_y = sh - int(img_h * 0.82)  # peek: lower body clipped by the screen edge
     hidden_y = sh + 20
     cur = {"y": hidden_y}
-    root.geometry(f"{size}x{size}+{x}+{hidden_y}")
+    root.geometry(f"{img_w}x{img_h}+{x}+{hidden_y}")
 
-    frames = {
-        "idle": ImageTk.PhotoImage(_to_keyed(draw_miku(size, "idle"))),
-        "listening": ImageTk.PhotoImage(_to_keyed(draw_miku(size, "listening"))),
-        "thinking": ImageTk.PhotoImage(_to_keyed(draw_miku(size, "thinking"))),
-        "speak_open": ImageTk.PhotoImage(_to_keyed(draw_miku(size, "speaking", True))),
-        "speak_closed": ImageTk.PhotoImage(_to_keyed(draw_miku(size, "speaking", False))),
-    }
     label = tk.Label(root, bg=key_hex, bd=0, highlightthickness=0)
     label.pack()
     label.configure(image=frames["idle"])
@@ -214,8 +254,7 @@ def _run_process(size: int, corner: str) -> int:
                 parts = cmds.get_nowait().split()
                 if not parts:
                     continue
-                verb = parts[0]
-                arg = parts[1] if len(parts) > 1 else ""
+                verb, arg = parts[0], (parts[1] if len(parts) > 1 else "")
                 if verb == "show":
                     st["name"] = arg or "listening"
                     st["visible"] = True
@@ -237,12 +276,16 @@ def _run_process(size: int, corner: str) -> int:
             cur["y"] += step if target > cur["y"] else -step
             if abs(cur["y"] - target) < step:
                 cur["y"] = target
-            root.geometry(f"{size}x{size}+{x}+{cur['y']}")
             if not st["visible"] and cur["y"] == hidden_y:
                 root.withdraw()
 
+        # gentle idle "breathing" bob; livelier nod while speaking
+        amp, freq = (7, 0.34) if st["name"] == "speaking" else (3, 0.10)
+        bob = int(amp * math.sin(st["tick"] * freq)) if st["visible"] else 0
+        root.geometry(f"{img_w}x{img_h}+{x}+{cur['y'] + bob}")
+
         name = st["name"]
-        if name == "speaking":
+        if animate_mouth and name == "speaking":
             img = frames["speak_open"] if (st["tick"] // 6) % 2 == 0 else frames["speak_closed"]
         else:
             img = frames.get(name, frames["idle"])
