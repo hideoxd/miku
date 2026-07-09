@@ -30,6 +30,21 @@ stage is behind a `Protocol`, so engines are swappable.
 | **3** | Push-to-talk / hands-free wake word + barge-in | `--ptt` · `--voice` |
 | **4** | Skills: PC control, web, calendar/email/todos | (function-calling tools) |
 | **5** | Always-on background service + system tray + auto-start | `--tray` · `--install-autostart` |
+| **6** | "Hi Miku" custom wake phrase + peeking Miku desktop mascot | (on by default) |
+
+### "Hi Miku" wake + desktop mascot (Phase 6)
+
+Say **"Hi Miku"** and a chibi Hatsune Miku **peeks up from the screen corner**,
+reacting as she listens (teal), thinks, and speaks (mouth moves), then slides away.
+
+- **Wake phrase** — `FRIDAY_WAKE_MODE=stt` spots any `FRIDAY_WAKE_PHRASE` (default
+  `miku`) by transcribing short speech windows — no model training. You can say it
+  in one breath: *"Hi Miku, what's the weather?"* Set `FRIDAY_WAKE_MODE=openwakeword`
+  for the cheaper pretrained "Hey Jarvis" detector instead.
+- **Mascot** — a click-through, always-on-top overlay drawn with PIL, running as
+  its own small process (so it never blocks the assistant). Toggle with
+  `FRIDAY_ENABLE_OVERLAY`, resize with `FRIDAY_OVERLAY_SIZE`, move with
+  `FRIDAY_OVERLAY_CORNER` (`bottom-right` / `bottom-left`).
 
 ### Skills (Phase 4)
 

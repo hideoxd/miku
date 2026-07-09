@@ -55,7 +55,9 @@ class Settings(BaseSettings):
     stt_model: str = "base.en"        # faster-whisper size (tiny.en/base.en/small.en)
     stt_compute_type: str = "int8"    # int8 is the CPU sweet spot
     stt_cpu_threads: int = 4          # pin to the P-cores; 0 = library default
+    wake_mode: str = "openwakeword"   # "openwakeword" | "stt" (custom spoken phrase)
     wake_model: str = "hey_jarvis"    # openWakeWord model name or path to a .onnx
+    wake_phrase: str = "miku"         # stt mode: word(s) that trigger a wake
     wake_threshold: float = 0.5       # 0-1; higher = fewer false wakes
     vad_threshold: float = 0.5        # silero speech probability threshold
     vad_silence_ms: int = 800         # trailing silence that ends a turn
@@ -93,6 +95,11 @@ class Settings(BaseSettings):
     # ---- Background service / tray (Phase 5) ----------------------------
     startup_greeting: bool = False   # speak a short line when the service starts
     tray_notifications: bool = True  # show tray balloon on wake / errors
+
+    # ---- Miku mascot overlay (Phase 6) ----------------------------------
+    enable_overlay: bool = True      # show the peeking Miku on wake
+    overlay_size: int = 240          # px
+    overlay_corner: str = "bottom-right"  # bottom-right | bottom-left
 
     @property
     def resolved_hf_token(self) -> str:
