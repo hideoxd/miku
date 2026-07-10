@@ -1,0 +1,20 @@
+{
+  "name": "friday-mascot3d",
+  "version": "1.0.0",
+  "private": true,
+  "description": "FRIDAY's real-time 3D Miku desktop mascot (Electron + three.js + three-vrm)",
+  "main": "main.js",
+  "scripts": {
+    "build": "esbuild renderer/src/app.js --bundle --format=iife --outfile=renderer/dist/bundle.js",
+    "postinstall": "npm run build",
+    "start": "electron ."
+  },
+  "dependencies": {
+    "@pixiv/three-vrm": "3.4.4",
+    "three": "0.170.0"
+  },
+  "devDependencies": {
+    "electron": "33.4.11",
+    "esbuild": "0.24.2"
+  }
+}

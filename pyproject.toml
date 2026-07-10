@@ -60,6 +60,10 @@ mascot = [
     "trimesh>=4.0",
     "pyglet<2",
 ]
+# Fetching/extracting the rigged VRM model for the real-time 3D mascot
+# (scripts/fetch_miku_vrm.py; the mascot itself lives in mascot3d/ — npm install there).
+mascot3d = ["py7zr>=0.21"]
+dev = ["pytest>=8.0"]
 
 [project.scripts]
 friday = "friday.main:main"
