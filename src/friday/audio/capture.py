@@ -39,14 +39,29 @@ class MicStream:
         self.sample_rate = sample_rate
         self.frame = frame
         self._device = _resolve_device(device)
-        self._q: queue.Queue = queue.Queue()
+        # Bounded to ~30 s of audio: nobody drains the queue while the LLM is
+        # thinking, and an unbounded queue would grow for as long as a reply
+        # (or a hang) lasts. On overflow the *oldest* frames are dropped.
+        max_frames = int(30 * sample_rate / frame)
+        self._q: queue.Queue = queue.Queue(maxsize=max_frames)
         self._stream: "sd.InputStream | None" = None
 
     def _callback(self, indata, frames, time_info, status) -> None:  # noqa: ANN001
         if status:
             log.debug("mic status: %s", status)
         # indata is (frames, channels) float32; take channel 0.
-        self._q.put(indata[:, 0].copy())
+        chunk = indata[:, 0].copy()
+        try:
+            self._q.put_nowait(chunk)
+        except queue.Full:
+            try:
+                self._q.get_nowait()  # drop the oldest frame
+            except queue.Empty:
+                pass
+            try:
+                self._q.put_nowait(chunk)
+            except queue.Full:
+                pass  # racing consumers refilled it; losing one frame is fine
 
     def __enter__(self) -> "MicStream":
         self._stream = sd.InputStream(

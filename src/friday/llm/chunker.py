@@ -20,36 +20,36 @@ class SentenceChunker:
         self._buf = ""
 
     def feed(self, text: str) -> list[str]:
-        """Add streamed text; return any complete sentences now ready to speak."""
+        """Add streamed text; return any complete sentences now ready to speak.
+
+        A chunk shorter than ``min_chars`` (or ending in an abbreviation) is
+        never emitted on its own — it extends to the next sentence boundary, so
+        TTS isn't fed choppy fragments like "Hi." as separate utterances.
+        """
         self._buf += text
         out: list[str] = []
         while True:
-            m = self._last_boundary(self._buf)
-            if m is None:
+            chunk = self._next_chunk()
+            if chunk is None:
                 break
-            end = m.end()
-            sentence = self._buf[:end].strip()
-            rest = self._buf[end:]
-            # Only emit if it's substantial and not a false abbreviation split.
-            if len(sentence) < self.min_chars or _ABBREV.search(sentence):
-                # keep waiting for more text unless there's clearly more sentence after
-                if not rest.strip():
-                    break
-            out.append(sentence)
-            self._buf = rest
+            out.append(chunk)
         return out
+
+    def _next_chunk(self) -> str | None:
+        """Earliest speakable prefix of the buffer, consumed; None if not ready."""
+        for m in _ENDING.finditer(self._buf):
+            after = self._buf[m.end() : m.end() + 1]
+            if after != "" and not after.isspace():
+                continue  # inside a word/number (e.g. a decimal point)
+            sentence = self._buf[: m.end()].strip()
+            if len(sentence) < self.min_chars or _ABBREV.search(sentence):
+                continue  # too short / abbreviation — grow to the next boundary
+            self._buf = self._buf[m.end() :]
+            return sentence
+        return None
 
     def flush(self) -> str:
         """Return whatever remains (call at end of stream)."""
         rest = self._buf.strip()
         self._buf = ""
         return rest
-
-    @staticmethod
-    def _last_boundary(text: str):
-        """First sentence-ending punctuation followed by space/newline or EOS."""
-        for m in _ENDING.finditer(text):
-            after = text[m.end() : m.end() + 1]
-            if after == "" or after.isspace():
-                return m
-        return None

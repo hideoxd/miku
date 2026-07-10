@@ -1,9 +1,8 @@
-"""The real-time voice loop: IDLE -> WAKE -> LISTENING -> THINKING -> SPEAKING.
+"""Voice-loop building blocks: utterance capture, barge-in, push-to-talk.
 
-Two entry points:
-  * run_ptt   — press Enter, then speak (VAD auto-stops). Simple + reliable.
-  * run_voice — fully hands-free: wake word -> listen -> Miku replies, with
-                barge-in (talk over her to interrupt).
+The hands-free loop itself lives in :mod:`friday.service` (``VoiceService``),
+which composes ``capture_utterance`` and ``_speak_with_bargein`` from here.
+``run_ptt`` is the simple press-Enter-then-speak CLI mode.
 
 Headphones are assumed so the mic doesn't hear Miku (which would false-trigger
 barge-in and transcribe her own speech).
@@ -22,21 +21,8 @@ from .config import Settings
 
 log = logging.getLogger("friday.voice")
 
-_STOP_WORDS = {"stop", "quit", "exit", "goodbye", "good bye", "shut down", "shutdown"}
-
-
 def _frame_ms(settings: Settings, mic: MicStream) -> float:
     return mic.frame / settings.mic_sample_rate * 1000.0
-
-
-def wait_for_wake(mic: MicStream, wake) -> None:
-    """Block until the wake word is detected."""
-    wake.reset()
-    mic.drain()
-    while True:
-        frame = mic.read()
-        if wake.triggered(MicStream.to_int16(frame)):
-            return
 
 
 def capture_utterance(
@@ -159,45 +145,4 @@ def run_ptt(settings: Settings, assistant, speaker, stt, vad) -> int:
             print(f"  {name.lower()}: ", end="", flush=True)
             speaker.speak_events(assistant.ask(text))
             print("\n")
-    return 0
-
-
-def run_voice(settings: Settings, assistant, speaker, stt, vad, wake) -> int:
-    """Hands-free: wake word -> listen -> reply, with barge-in."""
-    name = settings.assistant_name
-    print(f"{name} is listening. Say the wake word, then speak. Ctrl+C to quit.\n")
-    with MicStream(sample_rate=settings.mic_sample_rate, device=settings.input_device) as mic:
-        pending_capture = False  # set after barge-in: skip wake, listen immediately
-        while True:
-            try:
-                if not pending_capture:
-                    wait_for_wake(mic, wake)
-                    print("  (wake) yes?")
-                    try:
-                        speaker.say_text("Yes?")
-                    except Exception:  # noqa: BLE001
-                        pass
-                pending_capture = False
-
-                audio = capture_utterance(mic, vad, settings)
-                if len(audio) == 0:
-                    continue
-                text = stt.transcribe(audio, settings.mic_sample_rate)
-                print(f"  you: {text}")
-                if not text:
-                    continue
-                if text.strip(" .!").lower() in _STOP_WORDS:
-                    try:
-                        speaker.say_text("Goodbye.")
-                    except Exception:  # noqa: BLE001
-                        pass
-                    break
-
-                print(f"  {name.lower()}: ", end="", flush=True)
-                barged = _speak_with_bargein(assistant.ask(text), speaker, mic, vad, settings)
-                print()
-                pending_capture = barged  # if interrupted, capture the new command now
-            except KeyboardInterrupt:
-                print("\n(stopping)")
-                break
     return 0

@@ -81,7 +81,7 @@ def run_voice_mode(hands_free: bool) -> int:
         )
         service.start()
         try:
-            while service._thread and service._thread.is_alive():
+            while service.is_alive():
                 service.join(0.5)
         except KeyboardInterrupt:
             print("\n(stopping)")

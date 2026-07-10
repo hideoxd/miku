@@ -42,11 +42,16 @@ class LLMEngine(Protocol):
         self,
         messages: Iterable[Message],
         tools: list[ToolSchema] | None = None,
+        out_history: list[Message] | None = None,
     ) -> Iterator[StreamEvent]:
         """Stream a reply, transparently running any tool calls to completion.
 
         Yields ``TextDelta`` for spoken text and ``ToolActivity`` for tool use.
         Implementations mutate nothing the caller owns; conversation history is
-        managed by the caller.
+        managed by the caller. If ``out_history`` is given, the engine appends
+        every tool round-trip message (the assistant tool-call turn and the tool
+        results) to it so the caller can persist them in its history — without
+        them, the model forgets on the next turn which tools it called and what
+        they returned.
         """
         ...

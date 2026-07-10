@@ -72,6 +72,22 @@ def _create(name: str, settings: Settings) -> TTSEngine:
     raise ValueError(f"unknown TTS engine: {name!r}")
 
 
+def _cache_tag(name: str, settings: Settings) -> str:
+    """Cache key prefix identifying the *voice*, not just the engine.
+
+    Must include everything that changes the rendered audio — otherwise
+    switching (say) the Miku RVC model would replay stale cached phrases.
+    """
+    if name == "miku":
+        backend = (settings.miku_backend or "mikutts").lower()
+        if backend == "mikutts":
+            voice = f"{settings.miku_model}:{settings.miku_base_voice}:{settings.miku_f0_up_key}"
+        else:
+            voice = f"{backend}:{settings.miku_ref_audio}"
+        return f"{name}:{voice}"
+    return f"{name}:{settings.tts_voice}"
+
+
 def build_tts_engine(settings: Settings) -> TTSEngine:
     """Build the requested engine, falling back to SAPI on any failure."""
     requested = (settings.tts_engine or "sapi").lower()
@@ -89,7 +105,7 @@ def build_tts_engine(settings: Settings) -> TTSEngine:
                 from .caching import CachingTTS
 
                 engine = CachingTTS(
-                    engine, ROOT / "cache" / "tts", tag=f"{name}:{settings.tts_voice}"
+                    engine, ROOT / "cache" / "tts", tag=_cache_tag(name, settings)
                 )
                 log.info("phrase caching enabled for '%s'", name)
             return engine

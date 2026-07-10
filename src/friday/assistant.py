@@ -43,13 +43,17 @@ class Assistant:
         tools = self.registry.tools_schema()
 
         collected: list[str] = []
-        for event in self.engine.stream(self.messages, tools):
+        tool_turns: list[Message] = []  # completed tool round-trips, from the engine
+        for event in self.engine.stream(self.messages, tools, out_history=tool_turns):
             if isinstance(event, TextDelta):
                 collected.append(event.text)
             elif isinstance(event, ToolActivity):
                 log.info("tool → %s(%s)", event.name, event.arguments)
             yield event
 
+        # Persist tool calls + results, then the spoken text — so next turn the
+        # model remembers what it did and what the tools returned.
+        self.messages.extend(tool_turns)
         final = "".join(collected).strip()
         if final:
             self.messages.append({"role": "assistant", "content": final})

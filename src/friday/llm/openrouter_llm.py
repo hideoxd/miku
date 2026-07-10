@@ -43,9 +43,12 @@ class OpenRouterEngine(LLMEngine):
         self,
         messages: Iterable[Message],
         tools: list[ToolSchema] | None = None,
+        out_history: list[Message] | None = None,
     ) -> Iterator[StreamEvent]:
-        # Work on our own copy so we can append tool round-trips without
-        # clobbering the caller's history (the caller appends the final text).
+        # Work on our own copy so a mid-stream failure can't leave the caller's
+        # history with a dangling tool-call turn (the API rejects an assistant
+        # tool_calls message that isn't followed by tool results). Completed
+        # tool round-trips are reported back through ``out_history``.
         convo: list[Message] = list(messages)
         tools = tools or None
 
@@ -58,8 +61,11 @@ class OpenRouterEngine(LLMEngine):
             if out["finish"] != "tool_calls" or not tool_calls:
                 return  # normal completion
 
-            # Record the assistant's tool-call turn, then run each tool.
-            convo.append(
+            # Record the assistant's tool-call turn, then run each tool. The
+            # same messages go to out_history so the caller can persist them —
+            # otherwise the model forgets on the next turn what it called and
+            # what came back.
+            round_trip: list[Message] = [
                 {
                     "role": "assistant",
                     "content": None,
@@ -72,13 +78,16 @@ class OpenRouterEngine(LLMEngine):
                         for tc in tool_calls
                     ],
                 }
-            )
+            ]
             for tc in tool_calls:
                 yield ToolActivity(name=tc["name"], arguments=tc["arguments"])
                 result = self.dispatch(tc["name"], tc["arguments"])
-                convo.append(
+                round_trip.append(
                     {"role": "tool", "tool_call_id": tc["id"], "content": result}
                 )
+            convo.extend(round_trip)
+            if out_history is not None:
+                out_history.extend(round_trip)
 
         log.warning("hit max_tool_rounds (%d); stopping tool loop", self.settings.max_tool_rounds)
 
