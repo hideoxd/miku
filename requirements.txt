@@ -1,26 +1,14 @@
-# Phase 0 (brain) — install these first
+# pyproject.toml is the source of truth for dependencies — install with extras:
+#
+#   pip install -e .                                        # Phase 0 core only
+#   pip install -e .[voice,stt,skills,tray,miku]            # everything the tray runs
+#   pip install -e .[mascot3d]                              # + fetch script for the 3D mascot
+#   pip install -e .[dev]                                   # pytest
+#
+# The 3D mascot itself is a Node app:  cd mascot3d && npm install
+#
+# Kept only so `pip install -r requirements.txt` still bootstraps Phase 0:
 openai>=1.40
 pydantic>=2.7
 pydantic-settings>=2.3
 python-dotenv>=1.0
-
-# ---- Later phases (uncomment as you reach them) --------------------------
-# Phase 1 (audio out):
-# sounddevice>=0.4.7
-# numpy>=1.26
-# soundfile>=0.12
-# kokoro>=0.7        # base TTS (or piper-tts)
-#
-# Phase 2 (Miku voice, cloud):
-# gradio_client>=1.3
-#
-# Phase 3 (speech in):
-# faster-whisper>=1.0
-# openwakeword>=0.6
-# silero-vad>=5.1
-#
-# Phase 4 (skills):
-# ddgs>=6.0          # keyless web search
-# AppOpener>=1.7     # open Windows apps
-# pycaw>=20240210    # Windows volume control
-# comtypes>=1.4

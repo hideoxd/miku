@@ -31,27 +31,63 @@ stage is behind a `Protocol`, so engines are swappable.
 | **4** | Skills: PC control, web, calendar/email/todos | (function-calling tools) |
 | **5** | Always-on background service + system tray + auto-start | `--tray` · `--install-autostart` |
 | **6** | "Hi Miku" custom wake phrase + peeking Miku desktop mascot | (on by default) |
+| **9** | **Living 3D Miku mascot** — articulated, draggable, cursor-tracking | (on by default once set up) |
 
-### "Hi Miku" wake + desktop mascot (Phase 6)
+### "Hi Miku" wake phrase (Phase 6)
 
-Say **"Hi Miku"** and a chibi Hatsune Miku **peeks up from the screen corner**,
-reacting as she listens (teal), thinks, and speaks (mouth moves), then slides away.
+`FRIDAY_WAKE_MODE=stt` spots any `FRIDAY_WAKE_PHRASE` (default `miku`) by
+transcribing short speech windows — no model training. You can say it in one
+breath: *"Hi Miku, what's the weather?"* Set `FRIDAY_WAKE_MODE=openwakeword`
+for the cheaper pretrained "Hey Jarvis" detector instead.
 
-- **Wake phrase** — `FRIDAY_WAKE_MODE=stt` spots any `FRIDAY_WAKE_PHRASE` (default
-  `miku`) by transcribing short speech windows — no model training. You can say it
-  in one breath: *"Hi Miku, what's the weather?"* Set `FRIDAY_WAKE_MODE=openwakeword`
-  for the cheaper pretrained "Hey Jarvis" detector instead.
-- **Mascot** — a **3D Miku** (`assets/miku.png`, rendered from a `.glb` model)
-  shown as a click-through, always-on-top overlay. On wake she **jumps/pops up**
-  from the corner (springy overshoot + grow-in), then breathes/nods while active
-  and drops away when done. Runs as its own small process (never blocks the
-  assistant); falls back to a PIL-drawn chibi if the asset is missing. Toggle with
-  `FRIDAY_ENABLE_OVERLAY`, resize with `FRIDAY_OVERLAY_SIZE`, move with
-  `FRIDAY_OVERLAY_CORNER`.
-  - **Use your own 3D model:** `pip install trimesh "pyglet<2"` then
-    `python scripts/render_mascot.py path\to\model.glb --az 25` — it renders the
-    model, removes the background, and saves the mascot asset. Or just drop any
-    transparent PNG at `src/friday/assets/miku.png`.
+### The living 3D Miku mascot (Phase 9)
+
+A real-time **animated 3D Miku** (Tda-style V4X, VRM) lives on your desktop in a
+transparent always-on-top window — not an image: a rigged model with articulated
+head, arms, torso, fingers, and 60+ facial morphs.
+
+**One-time setup** (~300 MB for Electron, one `npm install`):
+
+```bash
+pip install py7zr                        # or: pip install -e .[mascot3d]
+python scripts/fetch_miku_vrm.py         # downloads + installs models/miku.vrm
+cd mascot3d && npm install               # Electron + three.js + three-vrm, builds the bundle
+```
+
+Restart the tray and she's alive. What she does:
+
+- **Idle** — breathes, sways, blinks, twintails swing; glances around when bored.
+- **Cursor gaze** — her eyes and head smoothly follow your mouse anywhere on screen
+  (eyes lead, head lags — very alive).
+- **Wake ("Hi Miku")** — springs up from the bottom with a squash-and-stretch pop,
+  **waves at you** with a big smile.
+- **Listening** — leans in, eyes wide. **Thinking** — tilts her head, hand to chin.
+  **Speaking** — mouth syncs with a talking rhythm, livelier bobs.
+- **Drag her** — grab her body and put her anywhere; she dangles surprised while
+  carried and remembers the spot across restarts.
+- **Headpat** — quick click on her head → blush + happy squint. Try it.
+- **Click-through** — everywhere except her body, clicks pass to your desktop.
+
+Config: `FRIDAY_OVERLAY_BACKEND=3d|png|off` (auto-falls back to the Phase-6 PNG
+overlay if Electron or the model is missing), `FRIDAY_OVERLAY_SIZE`,
+`FRIDAY_OVERLAY_FPS` (default 30), `FRIDAY_OVERLAY_CORNER` (first-run position).
+If she ever crashes, the service restarts her automatically (max 3× / 5 min).
+
+Bring your own model: any humanoid `.vrm` works —
+`python scripts/fetch_miku_vrm.py --file path\to\model.vrm`.
+
+> **OneDrive tip:** exclude `mascot3d/node_modules` from sync (Settings → Sync →
+> choose folders) — thousands of small files sync slowly for zero benefit.
+
+<details>
+<summary>Legacy PNG mascot (Phase 6/7/8)</summary>
+
+The old overlay shows a pre-rendered PNG (`assets/miku.png`) in a click-through
+Tk window with a jump/pop on wake. It's the automatic fallback
+(`FRIDAY_OVERLAY_BACKEND=png`). Re-render the PNG from any `.glb`:
+`pip install trimesh "pyglet<2"`, then
+`python scripts/render_mascot.py path\to\model.glb --az 25`.
+</details>
 
 ### Skills (Phase 4)
 
@@ -173,19 +209,29 @@ falls back to the offline SAPI voice so it always speaks.
 
 - **Personal, non-commercial only.** Hatsune Miku is Crypton Future Media's
   character (Piapro Character License); her voice is a separate right that fan RVC
-  models don't license. Don't monetize, publish, or distribute the audio.
+  models don't license. Don't monetize, publish, or distribute the audio. The 3D
+  mascot model is fan-made (Tda-style) — don't redistribute it or use it in VRChat.
 - **Privacy:** cloud voice conversion and `edge-tts` send spoken text off your
   machine. For sensitive content, use the fully-local Piper + local-RVC path.
+- **Secrets:** this repo lives in a OneDrive-synced folder, so your `.env` (API
+  keys) syncs to the cloud with it. Keep the repo out of OneDrive, or exclude it
+  from sync, if that bothers you.
 
 ## Project layout
 
 ```
 src/friday/
-  main.py            CLI entry (--text / --selftest)
+  main.py            CLI entry (--text / --selftest / --voice / --tray …)
   assistant.py       conversation state + tool loop
+  service.py         hands-free VoiceService (wake → STT → LLM → TTS)
+  overlay.py         mascot client (3D/PNG backends) + the Tk PNG overlay
   config.py          .env-driven settings
   llm/               OpenRouter engine, streaming, sentence chunker
   skills/            function-calling registry + tools
-  stt/ tts/ audio/   engine Protocols (filled in Phases 1-3)
-scripts/             spike_rvc_benchmark.py
+  stt/ tts/ audio/   swappable engine Protocols
+mascot3d/            the 3D mascot (Electron + three.js + three-vrm)
+scripts/             fetch_miku_vrm.py · render_mascot.py
+tests/               pytest suite (chunker, registry, history, wake, cache)
 ```
+
+Run the tests: `pip install -e .[dev]` then `pytest`.
