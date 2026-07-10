@@ -29,18 +29,25 @@ async function main() {
     canvas,
     alpha: true,
     antialias: true,
-    powerPreference: "low-power",
+    powerPreference: "high-performance",
   });
-  renderer.setPixelRatio(1);
+  // Supersample: render at 2x the window resolution and let it downscale.
+  // Even on a 100%-scaling display this sharpens the face/hair dramatically
+  // (the model is small on screen, so 1x reads as blurry). Capped for the iGPU.
+  const SS = Math.min(2, (window.devicePixelRatio || 1) * 2);
+  renderer.setPixelRatio(SS);
   renderer.setSize(W, H, false);
   renderer.setClearColor(0x000000, 0);
 
   const scene = new Scene();
   const camera = new PerspectiveCamera(27, W / H, 0.1, 20);
-  scene.add(new AmbientLight(0xffffff, 0.65));
-  const sun = new DirectionalLight(0xffffff, 1.15);
+  scene.add(new AmbientLight(0xffffff, 0.72));
+  const sun = new DirectionalLight(0xffffff, 1.05);
   sun.position.set(0.4, 1.2, 1.5);
   scene.add(sun);
+  const rim = new DirectionalLight(0xdff4ff, 0.35); // soft cool rim for depth
+  rim.position.set(-0.8, 0.6, -0.7);
+  scene.add(rim);
 
   // ---- load the model (bytes via preload; fetch() can't read file://) ----------
   const loader = new GLTFLoader();
@@ -51,6 +58,18 @@ async function main() {
   VRMUtils.combineSkeletons(gltf.scene);
   VRMUtils.rotateVRM0(vrm); // VRM 0.x faces away by default
   scene.add(vrm.scene);
+
+  // Crisp textures: max anisotropic filtering + no over-aggressive mip blur.
+  const maxAniso = renderer.capabilities.getMaxAnisotropy();
+  vrm.scene.traverse((o) => {
+    if (!o.isMesh) return;
+    for (const mat of Array.isArray(o.material) ? o.material : [o.material]) {
+      if (mat && mat.map) {
+        mat.map.anisotropy = maxAniso;
+        mat.map.needsUpdate = true;
+      }
+    }
+  });
 
   const rig = new Rig(vrm);
   rig.setMorph("lightOff", 1); // this Tda model bakes AutoLuminous glow off via a morph

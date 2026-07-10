@@ -61,6 +61,11 @@ export class Animator {
     // Extra rotations merged in by gaze.js each frame.
     this.headExtra = { x: 0, y: 0, z: 0 };
     this.neckExtra = { x: 0, y: 0, z: 0 };
+    this.chestExtra = { y: 0 };
+
+    // Idle micro-emote scheduler (small spontaneous gestures when just idling).
+    this.nextEmote = 5 + Math.random() * 6;
+    this.emote = null; // {name, t, dur}
 
     // One-shot gesture: {name, t, dur}
     this.gesture = null;
@@ -108,12 +113,62 @@ export class Animator {
     this.dragging = d;
   }
 
+  // Spontaneous little idle gestures so she feels alive, not looping. Only
+  // fires while calmly idle (no scripted gesture, no drag).
+  _emote(dt, rot) {
+    if (this.gesture || this.dragging || this.stateName !== "idle") {
+      this.emote = null;
+      return;
+    }
+    if (this.emote) {
+      const e = this.emote;
+      e.t += dt;
+      const env = Math.sin(clamp(e.t / e.dur, 0, 1) * Math.PI); // ease in/out
+      if (e.name === "tilt") {
+        rot.head.z += e.dir * 0.24 * env;
+        rot.neck.z += e.dir * 0.06 * env;
+      } else if (e.name === "nod") {
+        rot.head.x += (0.06 + Math.sin(e.t * 8) * 0.09) * env;
+      } else if (e.name === "bounce") {
+        this.rootY += env * 0.022;
+        this._emoteMorph = { smileEyes: 0.55 * env, smileMouth: 0.5 * env };
+      } else if (e.name === "shrug") {
+        rot.leftUpperArm.z += 0.14 * env;
+        rot.rightUpperArm.z -= 0.14 * env;
+        rot.head.x += 0.05 * env;
+      } else if (e.name === "peek") {
+        rot.head.y += e.dir * 0.3 * env;
+        rot.upperChest.y += e.dir * 0.08 * env;
+      }
+      if (e.t >= e.dur) this.emote = null;
+      return;
+    }
+    if ((this.nextEmote -= dt) <= 0) {
+      const kinds = [
+        { name: "tilt", dur: 1.6 },
+        { name: "nod", dur: 1.0 },
+        { name: "bounce", dur: 0.9 },
+        { name: "shrug", dur: 1.1 },
+        { name: "peek", dur: 1.4 },
+      ];
+      const k = kinds[Math.floor(Math.random() * kinds.length)];
+      this.emote = { name: k.name, t: 0, dur: k.dur, dir: Math.random() < 0.5 ? -1 : 1 };
+      this.nextEmote = 5 + Math.random() * 7;
+    }
+  }
+
+  /** Trigger a happy nod (e.g. on acknowledging a command). */
+  nod() {
+    if (this.stateName === "idle") this.emote = { name: "nod", t: 0, dur: 1.0, dir: 1 };
+  }
+
   update(dt) {
     dt = Math.min(dt, 0.1);
     this.t += dt;
     const t = this.t;
     const rig = this.rig;
     this._waving = false; // set inside the wave gesture
+    this._emoteMorph = null; // set by _emote (e.g. bounce smile)
 
     // ---- smoothed state pose ------------------------------------------------
     const rot = {};
@@ -131,10 +186,17 @@ export class Animator {
     // Idle arm micro-motion so she never looks frozen.
     rot.leftUpperArm.z += Math.sin(t * 0.8) * 0.02 * sway;
     rot.rightUpperArm.z -= Math.sin(t * 0.8 + 1.1) * 0.02 * sway;
+    // Slow weight-shift onto one hip (extra life beyond the plain sway).
+    const shift = Math.sin(t * 0.28);
+    rot.hips.z += shift * 0.02 * sway;
+    rot.hips.x += Math.abs(Math.sin(t * 0.28)) * 0.01 * sway;
     if (bob > 0.01) {
       rot.head.x += Math.sin(t * 4.2) * 0.045 * bob;
       rot.head.z += Math.sin(t * 2.6) * 0.02 * bob;
     }
+
+    // ---- spontaneous idle emotes (only while calmly shown) ------------------
+    this._emote(dt, rot);
 
     // ---- gaze (computed by gaze.js) -----------------------------------------
     rot.head.x += this.headExtra.x;
@@ -142,6 +204,8 @@ export class Animator {
     rot.head.z += this.headExtra.z;
     rot.neck.x += this.neckExtra.x;
     rot.neck.y += this.neckExtra.y;
+    rot.upperChest.y += this.chestExtra.y;
+    rot.spine.y += this.chestExtra.y * 0.4;
 
     // ---- gestures -------------------------------------------------------------
     let morphOverride = {};
@@ -241,7 +305,11 @@ export class Animator {
     // Fingers: a soft relaxed curl so the hands look natural, opening up for a wave.
     rig.curlFingers(this._waving ? 0.05 : 0.4);
     for (const k of MORPH_KEYS) {
-      const v = Math.max(this.morphCh[k].update(dt), morphOverride[k] || 0);
+      const v = Math.max(
+        this.morphCh[k].update(dt),
+        morphOverride[k] || 0,
+        (this._emoteMorph && this._emoteMorph[k]) || 0,
+      );
       rig.setMorph(k, v);
     }
     // Blink combines with happy-closed eyes (whichever closes more wins).

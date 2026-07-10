@@ -17,10 +17,11 @@ export class Gaze {
     scene.add(this.target);
     if (vrm.lookAt) vrm.lookAt.target = this.target;
 
-    this.yaw = new Smooth(0, 4.5); // head lags…
-    this.pitch = new Smooth(0, 4.5);
-    this.eyeX = new Smooth(0, 14); // …eyes lead
-    this.eyeY = new Smooth(0, 14);
+    this.yaw = new Smooth(0, 5.0); // head lags…
+    this.pitch = new Smooth(0, 5.0);
+    this.eyeX = new Smooth(0, 16); // …eyes lead
+    this.eyeY = new Smooth(0, 16);
+    this.bodyYaw = new Smooth(0, 2.6); // upper body turns last, subtly
 
     this.lastCursor = { x: winW / 2, y: winH / 2 };
     this.idleFor = 0;
@@ -55,15 +56,18 @@ export class Gaze {
     // Window x-axis: cursor right of her = negative yaw (screen x grows right,
     // model yaw + turns her to *her* left, which is screen-right… VRM yaw +y is
     // to her left = viewer right for a facing model). Sign tuned visually.
-    this.yaw.target = nx * 0.42 * weight;
-    this.pitch.target = ny * 0.30 * weight;
+    this.yaw.target = nx * 0.5 * weight;
+    this.pitch.target = ny * 0.34 * weight;
+    this.bodyYaw.target = nx * 0.16 * weight; // upper body leans into the turn
     this.eyeX.target = nx;
     this.eyeY.target = ny;
 
     const yaw = this.yaw.update(dt);
     const pitch = this.pitch.update(dt);
-    animator.headExtra = { x: pitch * 0.7, y: yaw * 0.7, z: 0 };
-    animator.neckExtra = { x: pitch * 0.3, y: yaw * 0.3, z: 0 };
+    const body = this.bodyYaw.update(dt);
+    animator.headExtra = { x: pitch * 0.62, y: yaw * 0.62, z: 0 };
+    animator.neckExtra = { x: pitch * 0.28, y: yaw * 0.28, z: 0 };
+    animator.chestExtra = { y: body }; // subtle torso turn toward the cursor
 
     // Eye target floats in front of her face, offset by the cursor.
     const ex = this.eyeX.update(dt);
