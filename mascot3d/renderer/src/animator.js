@@ -113,6 +113,7 @@ export class Animator {
     this.t += dt;
     const t = this.t;
     const rig = this.rig;
+    this._waving = false; // set inside the wave gesture
 
     // ---- smoothed state pose ------------------------------------------------
     const rot = {};
@@ -162,12 +163,19 @@ export class Animator {
         this.rootScaleY = 1 + Math.sin(clamp(rise, 0, 1) * Math.PI) * 0.06;
         const wt = g.t - 0.35;
         if (wt > 0 && wt < 1.1) {
-          // Right-hand wave: arm up-out, forearm wagging.
+          // Right-hand wave: raise the arm up-out, forearm + wrist rock,
+          // hand open (fingers uncurl below).
           const in_ = clamp(wt / 0.18, 0, 1) * clamp((1.1 - wt) / 0.2, 0, 1);
-          rot.rightUpperArm.z += 2.25 * in_; // undo the down-pose, raise past shoulder
-          rot.rightUpperArm.x += -0.25 * in_;
-          rot.rightLowerArm.z += (-0.5 + Math.sin(wt * 14) * 0.55) * in_;
+          const wag = Math.sin(wt * 13);
+          // Arm raised up-and-out, slight elbow bend, open hand + wrist
+          // rocking side to side — a friendly "hi!" wave.
+          rot.rightUpperArm.z += 2.45 * in_;
+          rot.rightUpperArm.x += -0.2 * in_;
+          rot.rightLowerArm.z += (-0.45 + wag * 0.5) * in_; // gentle bend + rock
+          rot.rightHand.z += wag * 0.55 * in_; // wrist rocks
           rot.head.z += -0.12 * in_;
+          rot.head.x += -0.04 * in_;
+          if (in_ > 0.4) this._waving = true;
         }
         morphOverride.smileEyes = Math.max(morphOverride.smileEyes || 0, Math.sin(p * Math.PI) * 0.9);
         morphOverride.smileMouth = Math.max(morphOverride.smileMouth || 0, Math.sin(p * Math.PI) * 0.8);
@@ -230,6 +238,8 @@ export class Animator {
 
     // ---- write to the rig ----------------------------------------------------------
     for (const b of BONES) rig.setBone(b, rot[b].x, rot[b].y, rot[b].z);
+    // Fingers: a soft relaxed curl so the hands look natural, opening up for a wave.
+    rig.curlFingers(this._waving ? 0.05 : 0.4);
     for (const k of MORPH_KEYS) {
       const v = Math.max(this.morphCh[k].update(dt), morphOverride[k] || 0);
       rig.setMorph(k, v);

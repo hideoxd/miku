@@ -52,6 +52,20 @@ export class Rig {
       if (node) this.bones[name] = node;
     }
 
+    // Finger bones, per hand — the default VRM rest pose splays them flat,
+    // which reads as stiff/creepy. We give them a gentle relaxed curl.
+    this.fingers = { left: [], right: [] };
+    for (const side of ["left", "right"]) {
+      for (const finger of ["Thumb", "Index", "Middle", "Ring", "Little"]) {
+        for (const seg of ["Proximal", "Intermediate", "Distal"]) {
+          const node = vrm.humanoid.getNormalizedBoneNode(
+            side + finger + seg,
+          );
+          if (node) this.fingers[side].push({ node, finger, seg });
+        }
+      }
+    }
+
     // Morph targets: collect every mesh with a morph dictionary.
     this.morphMeshes = [];
     vrm.scene.traverse((o) => {
@@ -80,6 +94,22 @@ export class Rig {
   setBone(name, x, y, z) {
     const b = this.bones[name];
     if (b) b.rotation.set(x, y, z);
+  }
+
+  /** Curl every finger by `curl` (0 = straight/open, ~0.4 = relaxed rest). */
+  curlFingers(curl) {
+    for (const side of ["left", "right"]) {
+      const sign = side === "left" ? 1 : -1;
+      for (const { node, finger, seg } of this.fingers[side]) {
+        if (finger === "Thumb") {
+          // Thumb opposes the palm rather than curling into it.
+          node.rotation.set(0, -sign * 0.25 * curl, -sign * 0.15 * curl);
+        } else {
+          const amt = seg === "Proximal" ? 0.55 : seg === "Intermediate" ? 0.7 : 0.5;
+          node.rotation.z = sign * curl * amt;
+        }
+      }
+    }
   }
 
   setMorph(key, w) {

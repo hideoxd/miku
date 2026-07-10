@@ -180,6 +180,7 @@ ipcMain.on("renderer-ready", () => {
   for (const [v, a] of pending.splice(0)) dispatch(v, a);
   if (SCREENSHOT) {
     dispatch("show", argVal("shot-state", "idle"));
+    const shotDelay = parseInt(argVal("shot-delay", "2500"), 10);
     setTimeout(async () => {
       try {
         const img = await win.webContents.capturePage();
@@ -189,7 +190,7 @@ ipcMain.on("renderer-ready", () => {
         console.error("screenshot failed:", e);
       }
       app.quit();
-    }, 2500);
+    }, shotDelay);
   }
 });
 ipcMain.on("renderer-error", (_e, msg) => {
