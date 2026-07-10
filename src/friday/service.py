@@ -83,6 +83,10 @@ class VoiceService:
         if self._thread is not None:
             self._thread.join(timeout)
 
+    def is_alive(self) -> bool:
+        """True while the service loop thread is running."""
+        return self._thread is not None and self._thread.is_alive()
+
     def pause(self) -> None:
         self._paused.set()
         self._set_state("paused")
@@ -103,13 +107,14 @@ class VoiceService:
             self._on_state(s)
         except Exception:  # noqa: BLE001
             log.debug("on_state callback failed", exc_info=True)
-        # Drive the Miku mascot.
+        # Drive the Miku mascot. Any active state *shows* her (show is
+        # idempotent: already visible -> just a state change) so a thinking/
+        # speaking transition while hidden — timer announcements, a restarted
+        # mascot — still brings her up.
         if self.overlay is not None:
             try:
-                if s == "listening":
-                    self.overlay.show("listening")
-                elif s in ("thinking", "speaking"):
-                    self.overlay.set_state(s)
+                if s in ("listening", "thinking", "speaking"):
+                    self.overlay.show(s)
                 elif s in ("idle", "paused", "error", "stopped"):
                     self.overlay.hide()
             except Exception:  # noqa: BLE001
@@ -153,7 +158,7 @@ class VoiceService:
             try:
                 from .overlay import OverlayClient
 
-                self.overlay = OverlayClient(size=s.overlay_size, corner=s.overlay_corner)
+                self.overlay = OverlayClient(settings=s)
             except Exception as exc:  # noqa: BLE001
                 log.warning("Miku overlay unavailable: %s", exc)
 
@@ -268,18 +273,31 @@ class VoiceService:
         return False, ""
 
     def _run_turn(self, mic: MicStream, command_text: str) -> None:
+        # A turn may chain: if the user barges in over the reply, the
+        # interruption is captured immediately as the next command (no wake
+        # word needed) instead of being thrown away.
+        followup = self._run_exchange(mic, command_text)
+        while followup and not self._stop.is_set():
+            self._set_state("listening")
+            followup = self._run_exchange(mic, "", prompt=False)
+
+    def _run_exchange(self, mic: MicStream, command_text: str, *, prompt: bool = True) -> bool:
+        """One command -> reply. Returns True if the user interrupted the reply
+        (caller should immediately listen for the follow-up, without a prompt —
+        the user is already mid-sentence)."""
         s = self.settings
         command_text = (command_text or "").strip()
 
         if not command_text:
-            # Wake acknowledged — instant cached "Yes?" — then capture the command.
-            try:
-                self.speaker.say_text("Yes?")
-            except Exception:  # noqa: BLE001
-                pass
+            if prompt:
+                # Wake acknowledged — instant cached "Yes?" — then capture the command.
+                try:
+                    self.speaker.say_text("Yes?")
+                except Exception:  # noqa: BLE001
+                    pass
             audio = capture_utterance(mic, self.vad, s)
             if len(audio) == 0:
-                return
+                return False
             self._set_state("thinking")
             command_text = self.stt.transcribe(audio, s.mic_sample_rate)
         else:
@@ -288,14 +306,14 @@ class VoiceService:
         self._print(f"  you: {command_text}")
         self._on_transcript(command_text)
         if not command_text:
-            return
+            return False
         if command_text.strip(" .!?").lower() in _STOP_WORDS:
             try:
                 self.speaker.say_text("Pausing. Say the wake word when you need me.")
             except Exception:  # noqa: BLE001
                 pass
             self.pause()
-            return
+            return False
 
         self._set_state("speaking")
-        _speak_with_bargein(self.assistant.ask(command_text), self.speaker, mic, self.vad, s)
+        return _speak_with_bargein(self.assistant.ask(command_text), self.speaker, mic, self.vad, s)

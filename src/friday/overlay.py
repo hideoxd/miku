@@ -1,23 +1,38 @@
-"""A little Hatsune Miku that peeks up from the screen corner.
+"""The Miku desktop mascot, and the client that drives her.
 
-When FRIDAY wakes ("Hi Miku"), a chibi Miku slides up from the bottom edge and
-reacts to state (listening / thinking / speaking), then slides back down.
+Two backends, same one-line command protocol (``show <state>`` ·
+``state <state>`` · ``hide`` · ``stop``):
 
-Tkinter must own its thread's main loop, and the tray already owns the main
-thread — so the overlay runs as its own tiny process (``python -m friday.overlay``)
-and is driven over stdin by :class:`OverlayClient`. Commands (one per line):
-``show <state>`` · ``state <state>`` · ``hide`` · ``stop`` (or EOF).
+* ``3d`` (default) — the real-time animated 3D Miku in ``mascot3d/`` (Electron +
+  three-vrm: articulated head/arms/torso, cursor gaze, draggable, headpat).
+  Driven over a localhost TCP socket (Electron's stdin is unreliable on
+  Windows); the socket doubles as a parent-death signal.
+* ``png`` (fallback) — this module's Tkinter window showing the static rendered
+  PNG (or the drawn chibi if the asset is missing), driven over stdin. Tkinter
+  must own its thread's main loop and the tray already owns the main thread, so
+  it runs as its own process (``python -m friday.overlay``).
+
+:class:`OverlayClient` picks the backend, spawns the process, restarts it if it
+dies (budgeted), and restores the visible state after a restart.
 """
 
 from __future__ import annotations
 
 import logging
+import socket
 import subprocess
 import sys
 import threading
+import time
 from pathlib import Path
 
 log = logging.getLogger("friday.overlay")
+
+ROOT = Path(__file__).resolve().parents[2]
+MASCOT3D_DIR = ROOT / "mascot3d"
+ELECTRON_EXE = MASCOT3D_DIR / "node_modules" / "electron" / "dist" / "electron.exe"
+MASCOT_BUNDLE = MASCOT3D_DIR / "renderer" / "dist" / "bundle.js"
+VRM_PATH = ROOT / "models" / "miku.vrm"
 
 TEAL = (57, 197, 187, 255)
 TEAL_D = (42, 160, 152, 255)
@@ -108,52 +123,220 @@ def _python_exe() -> str:
 
 
 class OverlayClient:
-    """Spawns the overlay process and drives it over stdin."""
+    """Spawns the mascot process (3D or PNG backend) and drives it.
 
-    def __init__(self, size: int = 240, corner: str = "bottom-right") -> None:
+    Resilient by design: if the child dies (crash, Task-Manager kill), the next
+    command restarts it — at most ``_RESTART_BUDGET`` times per
+    ``_RESTART_WINDOW`` seconds so a crash-looping mascot can't spam — and
+    re-shows the last visible state so Miku comes back where she was.
+    """
+
+    _RESTART_BUDGET = 3
+    _RESTART_WINDOW = 300.0  # seconds
+
+    def __init__(self, settings=None, *, size: int = 240, corner: str = "bottom-right") -> None:
+        if settings is not None:
+            self._size = settings.overlay_size
+            self._corner = settings.overlay_corner
+            self._fps = getattr(settings, "overlay_fps", 30)
+            requested = getattr(settings, "overlay_backend", "3d")
+        else:  # back-compat with the old (size=, corner=) construction
+            self._size, self._corner, self._fps, requested = size, corner, 30, "3d"
+
+        self.backend = self._resolve_backend(requested)
+        self._lock = threading.Lock()
         self._proc: subprocess.Popen | None = None
-        try:
-            flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
-            self._proc = subprocess.Popen(
-                [_python_exe(), "-m", "friday.overlay", "--size", str(size), "--corner", corner],
-                stdin=subprocess.PIPE,
-                cwd=str(Path(__file__).resolve().parents[2]),
-                creationflags=flags,
-                text=True,
+        self._sock: socket.socket | None = None
+        self._pending: list[str] = []  # 3d: lines queued until the socket connects
+        self._last: str | None = None  # last visible state (None = hidden)
+        self._restarts: list[float] = []
+        self._stopped = False
+        if self.backend != "off":
+            with self._lock:
+                self._spawn_locked()
+
+    # -- backend selection --------------------------------------------------
+
+    @staticmethod
+    def _resolve_backend(requested: str) -> str:
+        requested = (requested or "3d").lower()
+        if requested == "off":
+            return "off"
+        if requested == "3d":
+            missing = [p for p in (ELECTRON_EXE, MASCOT_BUNDLE, VRM_PATH) if not p.exists()]
+            if not missing:
+                return "3d"
+            log.warning(
+                "3D mascot unavailable (missing: %s) — using the PNG overlay. "
+                "Setup: `cd mascot3d && npm install` and `python scripts/fetch_miku_vrm.py`",
+                ", ".join(str(p.relative_to(ROOT)) for p in missing),
             )
+        return "png"
+
+    # -- process / transport ------------------------------------------------
+
+    def _spawn_locked(self) -> bool:
+        flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+        try:
+            if self.backend == "3d":
+                srv = socket.socket()
+                srv.bind(("127.0.0.1", 0))
+                srv.listen(1)
+                port = srv.getsockname()[1]
+                (ROOT / "cache").mkdir(exist_ok=True)
+                self._proc = subprocess.Popen(
+                    [
+                        str(ELECTRON_EXE),
+                        str(MASCOT3D_DIR),
+                        "--ctl-port", str(port),
+                        "--size", str(self._size),
+                        "--corner", self._corner,
+                        "--fps", str(self._fps),
+                        "--model", str(VRM_PATH),
+                        "--state-file", str(ROOT / "cache" / "mascot_window.json"),
+                    ],
+                    creationflags=flags,
+                )
+                self._sock = None
+                threading.Thread(
+                    target=self._accept, args=(srv, self._proc), daemon=True, name="mascot-accept"
+                ).start()
+            else:
+                self._proc = subprocess.Popen(
+                    [
+                        _python_exe(), "-m", "friday.overlay",
+                        "--size", str(self._size), "--corner", self._corner,
+                    ],
+                    stdin=subprocess.PIPE,
+                    cwd=str(ROOT),
+                    creationflags=flags,
+                    text=True,
+                )
+            return True
         except Exception as exc:  # noqa: BLE001
             log.warning("could not start overlay: %s", exc)
             self._proc = None
+            return False
 
-    def _send(self, line: str) -> None:
+    def _accept(self, srv: socket.socket, proc: subprocess.Popen) -> None:
+        """Wait (off-thread) for the Electron child to connect back, then flush
+        any commands that arrived while it was booting."""
+        conn: socket.socket | None = None
+        try:
+            srv.settimeout(30)
+            conn, _ = srv.accept()
+            conn.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+        except Exception as exc:  # noqa: BLE001
+            log.warning("3D mascot never connected: %s", exc)
+        finally:
+            srv.close()
+        with self._lock:
+            if self._proc is not proc:  # a restart superseded us
+                if conn is not None:
+                    conn.close()
+                return
+            self._sock = conn
+            if conn is not None:
+                for line in self._pending:
+                    self._write_locked(line)
+            self._pending.clear()
+
+    def _alive_locked(self) -> bool:
+        return self._proc is not None and self._proc.poll() is None
+
+    def _write_locked(self, line: str) -> bool:
+        """Push one command to the child; True on (apparent) success."""
+        if self.backend == "3d":
+            if self._sock is None:
+                if self._alive_locked():
+                    self._pending.append(line)  # still booting
+                    return True
+                return False
+            try:
+                self._sock.sendall((line + "\n").encode("utf-8"))
+                return True
+            except OSError:
+                try:
+                    self._sock.close()
+                except OSError:
+                    pass
+                self._sock = None
+                return False
+        # png backend: stdin pipe
         if self._proc is None or self._proc.stdin is None:
-            return
+            return False
         try:
             self._proc.stdin.write(line + "\n")
             self._proc.stdin.flush()
+            return True
         except (OSError, ValueError):
-            self._proc = None  # pipe died
+            return False
+
+    def _restart_locked(self) -> bool:
+        now = time.monotonic()
+        self._restarts = [t for t in self._restarts if now - t < self._RESTART_WINDOW]
+        if len(self._restarts) >= self._RESTART_BUDGET:
+            return False  # crash-looping — give up quietly, voice keeps working
+        self._restarts.append(now)
+        log.info("mascot process died — restarting")
+        if self._proc is not None:
+            try:
+                self._proc.kill()
+            except OSError:
+                pass
+        self._sock = None
+        self._pending.clear()
+        if not self._spawn_locked():
+            return False
+        if self._last is not None:
+            self._write_locked(f"show {self._last}")  # come back where she was
+        return True
+
+    def _send(self, line: str) -> None:
+        with self._lock:
+            if self._stopped or self.backend == "off":
+                return
+            if not self._alive_locked():
+                if not self._restart_locked():
+                    return
+            if not self._write_locked(line):
+                if self._restart_locked():
+                    self._write_locked(line)
+
+    # -- public API -----------------------------------------------------------
 
     def show(self, state: str = "listening") -> None:
+        self._last = state
         self._send(f"show {state}")
 
     def set_state(self, state: str) -> None:
+        self._last = state
         self._send(f"state {state}")
 
     def hide(self) -> None:
+        self._last = None
         self._send("hide")
 
     def stop(self) -> None:
         self._send("stop")
-        if self._proc is not None:
-            try:
-                self._proc.stdin.close()  # type: ignore[union-attr]
-            except Exception:  # noqa: BLE001
-                pass
-            try:
-                self._proc.wait(timeout=2)
-            except Exception:  # noqa: BLE001
-                self._proc.terminate()
+        with self._lock:
+            self._stopped = True
+            if self._sock is not None:
+                try:
+                    self._sock.close()
+                except OSError:
+                    pass
+                self._sock = None
+            if self._proc is not None:
+                if self._proc.stdin is not None:
+                    try:
+                        self._proc.stdin.close()
+                    except Exception:  # noqa: BLE001
+                        pass
+                try:
+                    self._proc.wait(timeout=3)
+                except Exception:  # noqa: BLE001
+                    self._proc.terminate()
 
 
 # --------------------------------------------------------------------------- assets

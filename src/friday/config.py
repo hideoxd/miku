@@ -96,10 +96,12 @@ class Settings(BaseSettings):
     startup_greeting: bool = False   # speak a short line when the service starts
     tray_notifications: bool = True  # show tray balloon on wake / errors
 
-    # ---- Miku mascot overlay (Phase 6) ----------------------------------
-    enable_overlay: bool = True      # show the peeking Miku on wake
-    overlay_size: int = 240          # px
+    # ---- Miku mascot overlay (Phase 6; 3D mascot Phase 9) ----------------
+    enable_overlay: bool = True      # show Miku on wake
+    overlay_backend: str = "3d"      # 3d (animated VRM) | png (static overlay) | off
+    overlay_size: int = 240          # px (3d: window width ≈ size+80)
     overlay_corner: str = "bottom-right"  # bottom-right | bottom-left
+    overlay_fps: int = 30            # 3d render cap (lower = less CPU/GPU)
 
     @property
     def resolved_hf_token(self) -> str:
