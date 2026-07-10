@@ -59,7 +59,7 @@ class Settings(BaseSettings):
     wake_model: str = "hey_jarvis"    # openWakeWord model name or path to a .onnx
     wake_phrase: str = "miku"         # stt mode: word(s) that trigger a wake
     wake_threshold: float = 0.5       # 0-1; higher = fewer false wakes
-    vad_threshold: float = 0.5        # silero speech probability threshold
+    vad_threshold: float = 0.6        # silero speech prob; higher = less ambient-noise pickup
     vad_silence_ms: int = 800         # trailing silence that ends a turn
     bargein_ms: int = 350             # speech-while-speaking that triggers barge-in
     max_utterance_s: float = 15.0     # hard cap on a single spoken turn

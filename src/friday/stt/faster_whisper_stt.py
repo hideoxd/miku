@@ -30,8 +30,20 @@ class FasterWhisperSTT:
         self.sample_rate = 16_000
 
     def transcribe(self, audio: np.ndarray, sample_rate: int = 16_000) -> str:
+        return self.transcribe_scored(audio, sample_rate)[0]
+
+    def transcribe_scored(
+        self, audio: np.ndarray, sample_rate: int = 16_000
+    ) -> tuple[str, float, float, float]:
+        """Transcribe and also return decode-confidence signals.
+
+        Returns ``(text, avg_logprob, no_speech_prob, compression_ratio)``.
+        Callers (the wake spotter) use these to reject Whisper's hallucinations
+        on non-speech audio — base.en happily invents fluent sentences from fan
+        noise or silence, which must not be treated as a spoken command.
+        """
         if audio is None or len(audio) == 0:
-            return ""
+            return "", -10.0, 1.0, 0.0
         audio = np.ascontiguousarray(audio, dtype=np.float32)
         if sample_rate != self.sample_rate:
             audio = _resample(audio, sample_rate, self.sample_rate)
@@ -42,7 +54,14 @@ class FasterWhisperSTT:
             vad_filter=False,     # we do our own VAD/endpointing
             condition_on_previous_text=False,
         )
-        return " ".join(seg.text.strip() for seg in segments).strip()
+        segs = list(segments)
+        text = " ".join(seg.text.strip() for seg in segs).strip()
+        if not segs:
+            return "", -10.0, 1.0, 0.0
+        avg_logprob = sum(s.avg_logprob for s in segs) / len(segs)
+        no_speech = sum(s.no_speech_prob for s in segs) / len(segs)
+        compression = max(s.compression_ratio for s in segs)
+        return text, avg_logprob, no_speech, compression
 
 
 def _resample(audio: np.ndarray, src: int, dst: int) -> np.ndarray:

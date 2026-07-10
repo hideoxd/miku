@@ -11,8 +11,10 @@ Driven by both the tray app and the CLI ``--voice`` mode.
 
 from __future__ import annotations
 
+import difflib
 import logging
 import queue
+import re
 import threading
 import time
 
@@ -24,19 +26,80 @@ log = logging.getLogger("friday.service")
 
 _STOP_WORDS = {"stop", "quit", "exit", "goodbye", "good bye", "shut down", "shutdown"}
 
+# Whisper (base.en, greedy) mangles the Japanese name "Miku" a dozen ways,
+# especially with a non-US accent — these are all treated as the wake word.
+_MIKU_VARIANTS = frozenset({
+    "miku", "mikku", "mikuu", "myku", "meeku", "meku", "mieku", "meiku",
+    "miko", "mikko", "mikou", "meeko", "meekoo", "mekou", "mekoo", "meko",
+    "mieko", "meikou", "niku", "nikku", "nikko", "niko", "micku", "micko",
+    "mika", "meco", "meeco", "meack", "meekou",
+})
+
+# Greetings that commonly fuse onto the wake word ("heymiku", "himiku").
+_GREETINGS = ("hi", "hey", "hai", "hello", "okay", "ok", "yo", "he")
+
 # High-level states surfaced to the UI.
 STATES = ("loading", "idle", "listening", "thinking", "speaking", "paused", "error", "stopped")
 
 
+def _clean_command(s: str) -> str:
+    return s.strip().strip(" ,.!?-—").strip()
+
+
+def _similar(a: str, b: str) -> float:
+    return difflib.SequenceMatcher(None, a, b).ratio()
+
+
+def _is_wake_token(word: str, phrase: str) -> bool:
+    """True if a single transcribed word is (a mishearing of) the wake word."""
+    if len(word) < 3:
+        return False
+    if word == phrase:
+        return True
+    if phrase == "miku" and word in _MIKU_VARIANTS:
+        return True
+    # Fuzzy fallback for near-misses. Permissive on purpose: a rare false wake
+    # just pops Miku up saying "Yes?", which beats never waking at all. Requires
+    # the same first letter so unrelated words don't trigger.
+    return word[0] == phrase[0] and _similar(word, phrase) >= 0.74
+
+
 def match_wake_phrase(text: str, phrase: str) -> tuple[bool, str]:
-    """If ``phrase`` occurs in ``text``, return (True, the text after it)."""
-    t = (text or "").lower()
+    """Return (woke, trailing_command).
+
+    Fuzzy by design: Whisper rarely transcribes "Miku" cleanly, so an exact
+    substring match misses almost every real utterance. We match the wake token
+    against a set of known mishearings plus a similarity threshold, and tolerate
+    a fused greeting ("himiku") or a split mishearing ("mee koo").
+    """
     p = (phrase or "").strip().lower()
-    if not p or p not in t:
+    if not p:
         return False, ""
-    idx = t.find(p)
-    rest = t[idx + len(p):].strip(" ,.!?-—")
-    return True, rest
+
+    raw = re.findall(r"\S+", text or "")            # original tokens (keep the command intact)
+    norm = [re.sub(r"[^a-z0-9]+", "", t.lower()) for t in raw]
+
+    # Multi-word custom phrase: normalized substring match.
+    if " " in p:
+        joined = " ".join(n for n in norm if n)
+        if p in joined:
+            return True, _clean_command(joined.split(p, 1)[1])
+        return False, ""
+
+    # Single-token wake word (the default "miku"): scan words + adjacent pairs.
+    for i, w in enumerate(norm):
+        if not w:
+            continue
+        cand = w
+        for g in _GREETINGS:                        # peel a fused greeting
+            if cand.startswith(g) and len(cand) >= len(g) + 3:
+                cand = cand[len(g):]
+                break
+        if _is_wake_token(w, p) or _is_wake_token(cand, p):
+            return True, _clean_command(" ".join(raw[i + 1:]))
+        if i + 1 < len(norm) and _is_wake_token(w + norm[i + 1], p):
+            return True, _clean_command(" ".join(raw[i + 2:]))
+    return False, ""
 
 
 class VoiceService:
@@ -266,8 +329,20 @@ class VoiceService:
             audio = capture_utterance(mic, self.vad, self.settings, start_timeout_s=2.0)
             if len(audio) == 0:
                 continue
-            text = self.stt.transcribe(audio, self.settings.mic_sample_rate)
+            text, avg_lp, no_speech, comp = self.stt.transcribe_scored(
+                audio, self.settings.mic_sample_rate
+            )
+            if not text.strip():
+                continue
+            # Reject Whisper hallucinations on non-speech (fan noise, silence):
+            # low decode confidence, high no-speech prob, or repetitive gibberish.
+            if no_speech > 0.7 or avg_lp < -1.2 or comp > 2.6:
+                log.debug("ignored non-speech %r (lp=%.2f ns=%.2f cr=%.2f)",
+                          text, avg_lp, no_speech, comp)
+                continue
             woke, rest = match_wake_phrase(text, phrase)
+            # Visible so wake mishears can be diagnosed and tuned.
+            log.info("wake-listen heard %r -> wake=%s", text, woke)
             if woke:
                 return True, rest
         return False, ""
