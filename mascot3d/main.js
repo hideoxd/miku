@@ -211,7 +211,12 @@ ipcMain.on("renderer-ready", () => {
 });
 ipcMain.on("renderer-error", (_e, msg) => {
   console.error("renderer error:", msg);
-  if (SCREENSHOT) app.quit();
+  // An error before `ready` means the renderer's main() rejected (GL context
+  // creation, a bad/incompatible VRM, three-vrm parse failure): init is fatal
+  // and won't self-heal, and `pending` would grow forever. Quit so the control
+  // socket closes and the Python parent re-spawns us via its restart budget.
+  // Once ready, a stray window.error is a survivable runtime hiccup — just log.
+  if (SCREENSHOT || !ready) app.quit();
 });
 ipcMain.on("set-ignore", (_e, ignore) => {
   if (win && !DEBUG) win.setIgnoreMouseEvents(!!ignore, { forward: true });

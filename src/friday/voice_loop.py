@@ -83,12 +83,14 @@ def _speak_with_bargein(events, speaker, mic: MicStream, vad, settings: Settings
     mic.drain()
     vad.reset()
     done = threading.Event()
+    error: list[Exception] = []  # worker-thread failure, surfaced to the caller
 
     def _run():
         try:
             speaker.speak_events(events)
-        except Exception:  # noqa: BLE001
+        except Exception as exc:  # noqa: BLE001
             log.exception("speak failed")
+            error.append(exc)
         finally:
             done.set()
 
@@ -120,6 +122,12 @@ def _speak_with_bargein(events, speaker, mic: MicStream, vad, settings: Settings
             speech = 0
 
     done.wait()
+    # A failure in the LLM/tool/TTS stream only surfaced inside the worker
+    # thread; re-raise it so the caller reports the error instead of treating a
+    # broken turn as a successful, non-barged one. A barge-in stop can legitimately
+    # abort the worker mid-reply, so don't re-raise in that case.
+    if error and not barged:
+        raise error[0]
     return barged
 
 

@@ -34,10 +34,16 @@ def available() -> bool:
 
 
 def _service(api: str, version: str):
-    """Build an authorized Google API client (runs OAuth on first use)."""
+    """Build an authorized Google API client from a cached token.
+
+    Never runs the interactive consent flow here: this is called from a skill
+    handler on the single voice-service thread, and ``run_local_server`` would
+    block that thread (freezing wake word / barge-in / stop) until the user
+    finished browser consent. If no usable token exists, raise a clear error so
+    the model relays it — run ``authorize()`` (see ``__main__``) to set up.
+    """
     from google.auth.transport.requests import Request
     from google.oauth2.credentials import Credentials
-    from google_auth_oauthlib.flow import InstalledAppFlow
     from googleapiclient.discovery import build
 
     creds = None
@@ -46,11 +52,26 @@ def _service(api: str, version: str):
     if not creds or not creds.valid:
         if creds and creds.expired and creds.refresh_token:
             creds.refresh(Request())
+            _TOKEN.write_text(creds.to_json(), encoding="utf-8")
         else:
-            flow = InstalledAppFlow.from_client_secrets_file(str(_CREDS), SCOPES)
-            creds = flow.run_local_server(port=0)
-        _TOKEN.write_text(creds.to_json(), encoding="utf-8")
+            raise RuntimeError(
+                "Google authorization needed — run "
+                "'python -m friday.skills.google_apis' once to grant access."
+            )
     return build(api, version, credentials=creds, cache_discovery=False)
+
+
+def authorize() -> None:
+    """Run the interactive OAuth consent flow and cache ``token.json``.
+
+    Setup-only: opens a browser and blocks until consent, so it must NOT run on
+    the voice-service thread. Invoke it as a one-off from a terminal.
+    """
+    from google_auth_oauthlib.flow import InstalledAppFlow
+
+    flow = InstalledAppFlow.from_client_secrets_file(str(_CREDS), SCOPES)
+    creds = flow.run_local_server(port=0)
+    _TOKEN.write_text(creds.to_json(), encoding="utf-8")
 
 
 def register(reg: SkillRegistry) -> None:
@@ -198,3 +219,7 @@ def register(reg: SkillRegistry) -> None:
         except Exception as exc:  # noqa: BLE001
             return {"error": f"Gmail error: {exc}"}
         return {"ok": True, "sent_to": to}
+
+
+if __name__ == "__main__":  # one-off setup: grant Google access, cache token.json
+    authorize()

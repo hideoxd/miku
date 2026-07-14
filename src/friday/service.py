@@ -115,6 +115,11 @@ class VoiceService:
         self._stop = threading.Event()
         self._paused = threading.Event()
         self._thread: threading.Thread | None = None
+        # Serializes every speak site so a timer alert (fired from the skills
+        # timer thread) can't drive the shared AudioPlayer concurrently with an
+        # in-progress turn — which would interleave sentences or collide on the
+        # player's wait_done()/barge-in bookkeeping. The timer waits its turn.
+        self._speak_lock = threading.Lock()
 
         self.assistant = None
         self.speaker = None
@@ -229,7 +234,8 @@ class VoiceService:
         self._on_event("timer", msg)
         if self.speaker is not None:
             try:
-                self.speaker.say_text(msg)
+                with self._speak_lock:
+                    self.speaker.say_text(msg)
             except Exception:  # noqa: BLE001
                 log.exception("failed to speak timer alert")
 
@@ -245,7 +251,8 @@ class VoiceService:
 
         if self.settings.startup_greeting:
             try:
-                self.speaker.say_text(f"{self.settings.assistant_name} online.")
+                with self._speak_lock:
+                    self.speaker.say_text(f"{self.settings.assistant_name} online.")
             except Exception:  # noqa: BLE001
                 pass
 
@@ -367,7 +374,8 @@ class VoiceService:
             if prompt:
                 # Wake acknowledged — instant cached "Yes?" — then capture the command.
                 try:
-                    self.speaker.say_text("Yes?")
+                    with self._speak_lock:
+                        self.speaker.say_text("Yes?")
                 except Exception:  # noqa: BLE001
                     pass
                 if self.overlay is not None:
@@ -389,11 +397,15 @@ class VoiceService:
             return False
         if command_text.strip(" .!?").lower() in _STOP_WORDS:
             try:
-                self.speaker.say_text("Pausing. Say the wake word when you need me.")
+                with self._speak_lock:
+                    self.speaker.say_text("Pausing. Say the wake word when you need me.")
             except Exception:  # noqa: BLE001
                 pass
             self.pause()
             return False
 
         self._set_state("speaking")
-        return _speak_with_bargein(self.assistant.ask(command_text), self.speaker, mic, self.vad, s)
+        # Hold the speak lock for the whole reply (stream + playback + barge-in
+        # watch) so a timer alert can't interleave or clobber it mid-turn.
+        with self._speak_lock:
+            return _speak_with_bargein(self.assistant.ask(command_text), self.speaker, mic, self.vad, s)

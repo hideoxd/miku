@@ -91,6 +91,45 @@ def _cache_tag(name: str, settings: Settings) -> str:
     return f"{name}:{settings.tts_voice}"
 
 
+class _RuntimeSapiFallback:
+    """Wrap a cloud engine so a *synth-time* failure still speaks.
+
+    ``build_tts_engine``'s try/except only covers CONSTRUCTION — an engine that
+    connects fine at startup but later throws inside ``synthesize`` (wifi drop,
+    ZeroGPU quota, HF 5xx) would otherwise lose the whole reply as silence. This
+    catches that and delegates to an offline SAPI voice, built lazily on first
+    failure and cached, honouring the module's "always falls back to SAPI"
+    promise.
+    """
+
+    def __init__(self, inner: TTSEngine, settings: Settings) -> None:
+        self.inner = inner
+        self._settings = settings
+        self._sr = int(getattr(inner, "sample_rate", 22_050))
+        self._fallback: TTSEngine | None = None
+
+    @property
+    def sample_rate(self) -> int:
+        return self._sr
+
+    @property
+    def prefers_full_text(self) -> bool:
+        return getattr(self.inner, "prefers_full_text", False)
+
+    def synthesize(self, text: str):
+        try:
+            pcm = self.inner.synthesize(text)
+            self._sr = int(self.inner.sample_rate)
+            return pcm
+        except Exception as exc:  # noqa: BLE001
+            log.warning("TTS synth failed (%s); falling back to offline SAPI", exc)
+            if self._fallback is None:
+                self._fallback = _create("sapi", self._settings)
+            pcm = self._fallback.synthesize(text)
+            self._sr = int(self._fallback.sample_rate)
+            return pcm
+
+
 def build_tts_engine(settings: Settings) -> TTSEngine:
     """Build the requested engine, falling back to SAPI on any failure."""
     requested = (settings.tts_engine or "sapi").lower()
@@ -111,6 +150,10 @@ def build_tts_engine(settings: Settings) -> TTSEngine:
                     engine, ROOT / "cache" / "tts", tag=_cache_tag(name, settings)
                 )
                 log.info("phrase caching enabled for '%s'", name)
+            # Non-SAPI engines can fail mid-session (network / GPU); wrap them so
+            # a synth-time error still falls back to the offline SAPI voice.
+            if name != "sapi":
+                engine = _RuntimeSapiFallback(engine, settings)
             return engine
         except Exception as exc:  # noqa: BLE001
             errors.append(f"{name}: {exc}")

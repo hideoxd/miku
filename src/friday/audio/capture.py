@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 import queue
+import time
 
 import numpy as np
 
@@ -22,6 +23,17 @@ else:
     _IMPORT_ERROR = None
 
 FRAME = 512  # samples @ 16 kHz
+
+# If the callback stops delivering frames for this long while the stream still
+# claims to be started, the input device has silently died (USB/Bluetooth drop,
+# host default-device switch, WASAPI reset). sounddevice never raises for this
+# in callback mode, so read() surfaces it as MicStreamDead and the caller
+# re-opens the stream. Generous enough not to trip on scheduling hiccups.
+WATCHDOG_S = 4.0
+
+
+class MicStreamDead(RuntimeError):
+    """The input stream stopped delivering audio — device dropped mid-stream."""
 
 
 def _resolve_device(device: str):
@@ -45,10 +57,15 @@ class MicStream:
         max_frames = int(30 * sample_rate / frame)
         self._q: queue.Queue = queue.Queue(maxsize=max_frames)
         self._stream: "sd.InputStream | None" = None
+        # Watchdog state: last time the callback delivered a frame, and a flag
+        # PortAudio sets if it finishes the stream on its own (device error).
+        self._last_frame = 0.0
+        self._dead = False
 
     def _callback(self, indata, frames, time_info, status) -> None:  # noqa: ANN001
         if status:
-            log.debug("mic status: %s", status)
+            log.warning("mic status: %s", status)  # visible: may signal a dying device
+        self._last_frame = time.monotonic()
         # indata is (frames, channels) float32; take channel 0.
         chunk = indata[:, 0].copy()
         try:
@@ -63,7 +80,14 @@ class MicStream:
             except queue.Full:
                 pass  # racing consumers refilled it; losing one frame is fine
 
+    def _on_finished(self) -> None:
+        # PortAudio calls this when the stream stops. If it fires while we still
+        # think the stream is running, the device aborted underneath us.
+        self._dead = True
+
     def __enter__(self) -> "MicStream":
+        self._dead = False
+        self._last_frame = time.monotonic()
         self._stream = sd.InputStream(
             samplerate=self.sample_rate,
             blocksize=self.frame,
@@ -71,6 +95,7 @@ class MicStream:
             dtype="float32",
             device=self._device,
             callback=self._callback,
+            finished_callback=self._on_finished,
         )
         self._stream.start()
         return self
@@ -82,8 +107,25 @@ class MicStream:
             self._stream = None
 
     def read(self, timeout: float | None = None) -> np.ndarray:
-        """Next frame of `frame` float32 samples (blocks)."""
-        return self._q.get(timeout=timeout)
+        """Next frame of `frame` float32 samples (blocks).
+
+        Raises MicStreamDead if the input device has stopped delivering audio,
+        so the caller can break out and re-open the stream instead of treating a
+        dead mic as endless silence.
+        """
+        try:
+            return self._q.get(timeout=timeout)
+        except queue.Empty:
+            # Empty is normally just silence between reads. But if the callback
+            # has gone quiet for WATCHDOG_S (or PortAudio finished the stream on
+            # its own) while we still think it's started, the device died.
+            if self._stream is not None and (
+                self._dead or time.monotonic() - self._last_frame > WATCHDOG_S
+            ):
+                raise MicStreamDead(
+                    f"no audio for {time.monotonic() - self._last_frame:.1f}s; input device died"
+                ) from None
+            raise
 
     def drain(self) -> None:
         """Discard buffered frames (e.g. after playback, to drop echo)."""

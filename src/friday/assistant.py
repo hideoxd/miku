@@ -44,19 +44,24 @@ class Assistant:
 
         collected: list[str] = []
         tool_turns: list[Message] = []  # completed tool round-trips, from the engine
-        for event in self.engine.stream(self.messages, tools, out_history=tool_turns):
-            if isinstance(event, TextDelta):
-                collected.append(event.text)
-            elif isinstance(event, ToolActivity):
-                log.info("tool → %s(%s)", event.name, event.arguments)
-            yield event
-
-        # Persist tool calls + results, then the spoken text — so next turn the
-        # model remembers what it did and what the tools returned.
-        self.messages.extend(tool_turns)
-        final = "".join(collected).strip()
-        if final:
-            self.messages.append({"role": "assistant", "content": final})
+        try:
+            for event in self.engine.stream(self.messages, tools, out_history=tool_turns):
+                if isinstance(event, TextDelta):
+                    collected.append(event.text)
+                elif isinstance(event, ToolActivity):
+                    log.info("tool → %s(%s)", event.name, event.arguments)
+                yield event
+        finally:
+            # Persist tool calls + results, then the spoken text — so next turn the
+            # model remembers what it did and what the tools returned. Runs even if
+            # the stream raised mid-turn, so history never keeps a dangling user turn:
+            # persist whatever was produced, or roll back the user turn if nothing was.
+            self.messages.extend(tool_turns)
+            final = "".join(collected).strip()
+            if final:
+                self.messages.append({"role": "assistant", "content": final})
+            elif not tool_turns:
+                self.messages.pop()
 
     def reset(self) -> None:
         """Clear the conversation, keeping the system prompt."""

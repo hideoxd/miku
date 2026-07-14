@@ -48,6 +48,34 @@ def _already_running() -> bool:
         return False
 
 
+def _release_mutex() -> None:
+    # Close the single-instance mutex handle so its named object is destroyed
+    # immediately, instead of lingering until this process fully exits. Needed
+    # by restart() so the replacement instance can claim singleton ownership
+    # while this one is still tearing down (which can take a few seconds).
+    global _MUTEX
+    if _MUTEX is None:
+        return
+    try:
+        import win32api
+
+        win32api.CloseHandle(_MUTEX)
+    except Exception:  # noqa: BLE001
+        pass
+    _MUTEX = None
+
+
+def _show_error(msg: str) -> None:
+    # Under pythonw there is no console/stderr, so a message box is the only
+    # way to make a fatal startup failure visible instead of silent.
+    try:
+        import ctypes
+
+        ctypes.windll.user32.MessageBoxW(0, msg, "FRIDAY", 0x10)  # MB_ICONERROR
+    except Exception:  # noqa: BLE001
+        pass
+
+
 def _make_icon(color):
     from PIL import Image, ImageDraw, ImageFont
 
@@ -74,7 +102,20 @@ def main() -> int:
         # Another tray instance owns the assistant; exit quietly.
         return 0
 
-    settings = get_settings()
+    try:
+        settings = get_settings()
+    except Exception:  # noqa: BLE001 — a bad .env value must not kill us silently
+        # Logging isn't configured yet; bring up file logging at the default
+        # level so the error is captured, then surface it — under pythonw the
+        # exception would otherwise propagate with no console and no feedback.
+        setup_logging()
+        log.exception("failed to load settings — check .env for invalid values")
+        _show_error(
+            "FRIDAY could not start: a value in your .env is invalid.\n"
+            "See logs\\friday.log for details."
+        )
+        return 1
+
     setup_logging(settings.log_level)
     log.info("FRIDAY tray starting")
 
@@ -117,7 +158,11 @@ def main() -> int:
             log.exception("autostart toggle failed")
 
     def restart(_icon, _item) -> None:
-        # Relaunch a fresh hidden instance, then quit this one.
+        # Relaunch a fresh hidden instance, then quit this one. Release the
+        # single-instance mutex first so the replacement can claim singleton
+        # ownership even while this process is still tearing down; otherwise it
+        # sees ERROR_ALREADY_EXISTS and exits, leaving no tray running.
+        _release_mutex()
         try:
             pyw = str(__import__("pathlib").Path(sys.executable).with_name("pythonw.exe"))
             subprocess.Popen([pyw, "-m", "friday.tray"], cwd=str(ROOT))

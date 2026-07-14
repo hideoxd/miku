@@ -51,9 +51,11 @@ class SapiEngine:
         try:
             stream = comtypes.client.CreateObject("SAPI.SpFileStream")
             stream.Open(tmp.name, _SSFM_CREATE_FOR_WRITE)
-            sp.AudioOutputStream = stream
-            sp.Speak(text)
-            stream.Close()
+            try:
+                sp.AudioOutputStream = stream
+                sp.Speak(text)
+            finally:
+                stream.Close()
             return self._load_wav(tmp.name)
         finally:
             try:

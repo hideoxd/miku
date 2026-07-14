@@ -211,6 +211,10 @@ export class Animator {
   update(dt) {
     dt = Math.min(dt, 0.1);
     this.t += dt;
+    // Root vertical offset is rebuilt from scratch each frame: entrance/exit set
+    // it absolutely, emotes add to it. Reset here so idle emotes don't accumulate
+    // and drift the model permanently upward.
+    this.rootY = 0;
     const t = this.t;
     const rig = this.rig;
     this._waving = false; // set inside the wave gesture
