@@ -42,7 +42,10 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
 
     # ---- Voice out (Phase 1) --------------------------------------------
-    tts_engine: str = "sapi"  # sapi | edge | piper | kokoro
+    # Default to Miku's (RVC) voice; build_tts_engine falls back to SAPI
+    # automatically if the cloud Space / HF token is unavailable, so offline
+    # still speaks.
+    tts_engine: str = "miku"  # miku | sapi | edge | piper | kokoro
     tts_voice: str = ""       # engine-specific voice id / model path (empty = default)
     tts_speed: float = 1.0    # 1.0 = normal
     output_device: str = ""   # sounddevice device name or index (empty = system default)
@@ -76,7 +79,9 @@ class Settings(BaseSettings):
     miku_model: str = "HATSUNE MIKU"  # which built-in Miku RVC model
     miku_base_voice: str = "en-US-AriaNeural-Female"  # edge base voice
     miku_f0_up_key: int = 6  # pitch shift toward Miku's register
-    miku_index_rate: float = 0.75
+    # Higher index_rate = timbre adheres more closely to the Miku RVC model
+    # (more "Miku", at the cost of a little more artifacting on hard consonants).
+    miku_index_rate: float = 0.9
 
     # -- gptsovits backend (reference clone) --
     miku_ref_audio: str = ""   # path to a 3-10s clip of the target voice
@@ -99,7 +104,7 @@ class Settings(BaseSettings):
     # ---- Miku mascot overlay (Phase 6; 3D mascot Phase 9) ----------------
     enable_overlay: bool = True      # show Miku on wake
     overlay_backend: str = "3d"      # 3d (animated VRM) | png (static overlay) | off
-    overlay_size: int = 240          # px (3d: window width ≈ size+80)
+    overlay_size: int = 280          # px (3d: window width ≈ size+80); larger renders crisper
     overlay_corner: str = "bottom-right"  # bottom-right | bottom-left
     overlay_fps: int = 30            # 3d render cap (lower = less CPU/GPU)
 

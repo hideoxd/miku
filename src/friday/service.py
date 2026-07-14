@@ -370,6 +370,11 @@ class VoiceService:
                     self.speaker.say_text("Yes?")
                 except Exception:  # noqa: BLE001
                     pass
+                if self.overlay is not None:
+                    try:
+                        self.overlay.emote("nod")  # a little nod on acknowledging
+                    except Exception:  # noqa: BLE001
+                        pass
             audio = capture_utterance(mic, self.vad, s)
             if len(audio) == 0:
                 return False

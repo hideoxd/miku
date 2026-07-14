@@ -81,7 +81,10 @@ def _cache_tag(name: str, settings: Settings) -> str:
     if name == "miku":
         backend = (settings.miku_backend or "mikutts").lower()
         if backend == "mikutts":
-            voice = f"{settings.miku_model}:{settings.miku_base_voice}:{settings.miku_f0_up_key}"
+            voice = (
+                f"{settings.miku_model}:{settings.miku_base_voice}:"
+                f"{settings.miku_f0_up_key}:{settings.miku_index_rate}"
+            )
         else:
             voice = f"{backend}:{settings.miku_ref_audio}"
         return f"{name}:{voice}"

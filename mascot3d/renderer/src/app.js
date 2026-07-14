@@ -10,6 +10,7 @@ import {
   Box3,
   Vector3,
   Clock,
+  SRGBColorSpace,
 } from "three";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import { VRMLoaderPlugin, VRMUtils } from "@pixiv/three-vrm";
@@ -22,8 +23,8 @@ const { args } = window.mascot;
 
 async function main() {
   const canvas = document.getElementById("stage");
-  const W = canvas.clientWidth;
-  const H = canvas.clientHeight;
+  let W = canvas.clientWidth;
+  let H = canvas.clientHeight;
 
   const renderer = new WebGLRenderer({
     canvas,
@@ -31,13 +32,15 @@ async function main() {
     antialias: true,
     powerPreference: "high-performance",
   });
-  // Supersample: render at 2x the window resolution and let it downscale.
+  // Supersample: render above the window resolution and let it downscale.
   // Even on a 100%-scaling display this sharpens the face/hair dramatically
-  // (the model is small on screen, so 1x reads as blurry). Capped for the iGPU.
-  const SS = Math.min(2, (window.devicePixelRatio || 1) * 2);
-  renderer.setPixelRatio(SS);
+  // (the model is small on screen, so 1x reads as blurry). The cap keeps the
+  // iGPU comfortable at 30fps; 2.75 lets hi-DPI displays go past native.
+  const superSample = () => Math.min(2.75, (window.devicePixelRatio || 1) * 2);
+  renderer.setPixelRatio(superSample());
   renderer.setSize(W, H, false);
   renderer.setClearColor(0x000000, 0);
+  renderer.outputColorSpace = SRGBColorSpace; // correct MToon color output
 
   const scene = new Scene();
   const camera = new PerspectiveCamera(27, W / H, 0.1, 20);
@@ -87,6 +90,24 @@ async function main() {
 
   const gaze = new Gaze(vrm, camera, scene, W, H);
   const interact = new Interact(vrm, camera, canvas, animator, () => animator.play("headpat"));
+
+  // Keep the drawing buffer matched to the canvas + current DPI. The window is
+  // fixed-size, but moving between monitors changes devicePixelRatio and fires
+  // a resize — without this the buffer would go stale and blur.
+  function onResize() {
+    const w = canvas.clientWidth;
+    const h = canvas.clientHeight;
+    if (!w || !h) return;
+    W = w;
+    H = h;
+    renderer.setPixelRatio(superSample());
+    renderer.setSize(W, H, false);
+    camera.aspect = W / H;
+    camera.updateProjectionMatrix();
+    gaze.winW = W;
+    gaze.winH = H;
+  }
+  window.addEventListener("resize", onResize);
 
   // ---- render loop (fps-capped, paused while hidden) ------------------------------
   const clock = new Clock();
@@ -138,6 +159,8 @@ async function main() {
       if (animator.hidden) animator.play("entrance");
     } else if (verb === "state") {
       animator.setState(arg || "idle");
+    } else if (verb === "emote") {
+      animator.emoteNow(arg || "nod");
     } else if (verb === "hide") {
       if (animator.hidden) {
         window.mascot.exitDone();

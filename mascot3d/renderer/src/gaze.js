@@ -38,10 +38,19 @@ export class Gaze {
   update(dt, animator, weight) {
     this.idleFor += dt;
 
-    // Normalized cursor position relative to the window (can exceed ±1 when
-    // the cursor is far away on screen — clamp keeps her from over-rotating).
-    let nx = clamp((this.lastCursor.x / this.winW - 0.5) * 2, -1.6, 1.6);
-    let ny = clamp((this.lastCursor.y / this.winH - 0.42) * 2, -1.2, 1.2);
+    // Direction from Miku's on-screen head to the cursor, normalized by half
+    // the display: ~0 when the cursor is right on her, saturating at ±1.x near
+    // a screen edge, so she accurately turns toward the cursor anywhere on
+    // screen. Falls back to window-relative coords if the geometry is absent.
+    const c = this.lastCursor;
+    let nx, ny;
+    if (c.cursorX !== undefined && c.spanX) {
+      nx = clamp((c.cursorX - c.headX) / c.spanX, -1.6, 1.6);
+      ny = clamp((c.cursorY - c.headY) / c.spanY, -1.2, 1.2);
+    } else {
+      nx = clamp((c.x / this.winW - 0.5) * 2, -1.6, 1.6);
+      ny = clamp((c.y / this.winH - 0.42) * 2, -1.2, 1.2);
+    }
 
     if (this.idleFor > 8) {
       // Bored: glance somewhere new every few seconds.

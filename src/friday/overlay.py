@@ -313,6 +313,14 @@ class OverlayClient:
         self._last = state
         self._send(f"state {state}")
 
+    def emote(self, name: str = "nod") -> None:
+        """Play a one-shot reaction (nod/giggle/stretch/…) without changing state.
+
+        A no-op on the PNG backend, which has no emote vocabulary — unknown
+        verbs are simply ignored there.
+        """
+        self._send(f"emote {name}")
+
     def hide(self) -> None:
         self._last = None
         self._send("hide")

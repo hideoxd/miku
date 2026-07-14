@@ -113,14 +113,16 @@ export class Animator {
     this.dragging = d;
   }
 
-  // Spontaneous little idle gestures so she feels alive, not looping. Only
-  // fires while calmly idle (no scripted gesture, no drag).
+  // Little gestures so she feels alive, not looping. Spontaneous ones fire only
+  // while calmly idle; a *forced* emote (assistant-triggered via emoteNow) plays
+  // in any state. Both still yield to a scripted gesture or a drag.
   _emote(dt, rot) {
-    if (this.gesture || this.dragging || this.stateName !== "idle") {
-      this.emote = null;
-      return;
-    }
+    const blocked = this.gesture || this.dragging;
     if (this.emote) {
+      if (blocked || (!this.emote.forced && this.stateName !== "idle")) {
+        this.emote = null;
+        return;
+      }
       const e = this.emote;
       e.t += dt;
       const env = Math.sin(clamp(e.t / e.dur, 0, 1) * Math.PI); // ease in/out
@@ -139,10 +141,35 @@ export class Animator {
       } else if (e.name === "peek") {
         rot.head.y += e.dir * 0.3 * env;
         rot.upperChest.y += e.dir * 0.08 * env;
+      } else if (e.name === "stretch") {
+        // Arms reach up and out, chin lifts — a little stretch.
+        rot.leftUpperArm.z -= 0.9 * env;
+        rot.rightUpperArm.z += 0.9 * env;
+        rot.head.x -= 0.14 * env;
+        this.rootY += env * 0.012;
+        this._emoteMorph = { smileEyes: 0.35 * env };
+      } else if (e.name === "giggle") {
+        // Bouncy shoulder giggle with a happy face.
+        rot.head.z += Math.sin(e.t * 14) * 0.05 * env;
+        this.rootY += Math.abs(Math.sin(e.t * 10)) * 0.018 * env;
+        this._emoteMorph = { smileEyes: 0.7 * env, smileMouth: 0.6 * env };
+      } else if (e.name === "lookAround") {
+        const s = Math.sin(e.t * 2.2);
+        rot.head.y += e.dir * 0.32 * s * env;
+        rot.neck.y += e.dir * 0.1 * s * env;
+        rot.upperChest.y += e.dir * 0.04 * s * env;
+      } else if (e.name === "sway") {
+        // Gentle side-to-side dance.
+        const s = Math.sin(e.t * 3.2);
+        rot.hips.z += s * 0.05 * env;
+        rot.upperChest.z += s * 0.03 * env;
+        rot.head.z += -s * 0.04 * env;
+        this.rootY += Math.abs(Math.sin(e.t * 3.2)) * 0.008 * env;
       }
       if (e.t >= e.dur) this.emote = null;
       return;
     }
+    if (blocked || this.stateName !== "idle") return;
     if ((this.nextEmote -= dt) <= 0) {
       const kinds = [
         { name: "tilt", dur: 1.6 },
@@ -150,6 +177,10 @@ export class Animator {
         { name: "bounce", dur: 0.9 },
         { name: "shrug", dur: 1.1 },
         { name: "peek", dur: 1.4 },
+        { name: "stretch", dur: 1.4 },
+        { name: "giggle", dur: 1.0 },
+        { name: "lookAround", dur: 2.0 },
+        { name: "sway", dur: 1.8 },
       ];
       const k = kinds[Math.floor(Math.random() * kinds.length)];
       this.emote = { name: k.name, t: 0, dur: k.dur, dir: Math.random() < 0.5 ? -1 : 1 };
@@ -157,9 +188,24 @@ export class Animator {
     }
   }
 
+  // Durations for on-demand emotes (also used by the idle scheduler above).
+  static EMOTE_DUR = {
+    nod: 1.0, tilt: 1.6, bounce: 0.9, shrug: 1.1, peek: 1.4,
+    stretch: 1.4, giggle: 1.0, lookaround: 2.0, sway: 1.8,
+  };
+
   /** Trigger a happy nod (e.g. on acknowledging a command). */
   nod() {
-    if (this.stateName === "idle") this.emote = { name: "nod", t: 0, dur: 1.0, dir: 1 };
+    this.emote = { name: "nod", t: 0, dur: 1.0, dir: 1, forced: true };
+  }
+
+  /** Play a named emote on demand (from the `emote <name>` command), in any state. */
+  emoteNow(name) {
+    const key = (name || "nod").toLowerCase();
+    const dur = Animator.EMOTE_DUR[key] || 1.0;
+    // Map lowercase command names back to the camelCase used in _emote.
+    const real = key === "lookaround" ? "lookAround" : key;
+    this.emote = { name: real, t: 0, dur, dir: Math.random() < 0.5 ? -1 : 1, forced: true };
   }
 
   update(dt) {
@@ -235,7 +281,7 @@ export class Animator {
           // rocking side to side — a friendly "hi!" wave.
           rot.rightUpperArm.z += 2.45 * in_;
           rot.rightUpperArm.x += -0.2 * in_;
-          rot.rightLowerArm.z += (-0.45 + wag * 0.5) * in_; // gentle bend + rock
+          rot.rightLowerArm.z += (0.45 + wag * 0.5) * in_; // gentle bend + rock
           rot.rightHand.z += wag * 0.55 * in_; // wrist rocks
           rot.head.z += -0.12 * in_;
           rot.head.x += -0.04 * in_;
@@ -282,9 +328,15 @@ export class Animator {
     }
 
     // ---- talking mouth ------------------------------------------------------------
+    // A jaw oscillation (aa) modulated by a slow syllable-stress envelope, plus
+    // an occasional rounded shape (oh), so talking reads less like a fixed flap.
     let aa = 0;
+    let oh = 0;
     if (this.state.talkMouth) {
-      aa = clamp(0.12 + 0.5 * Math.abs(Math.sin(t * 9.5) + 0.3 * Math.sin(t * 23)), 0, 0.85);
+      const jaw = Math.abs(Math.sin(t * 9.5) + 0.3 * Math.sin(t * 23));
+      const stress = 0.6 + 0.4 * Math.sin(t * 2.3); // syllable stress
+      aa = clamp(0.1 + 0.55 * jaw * stress, 0, 0.9);
+      oh = clamp(0.3 * Math.max(0, Math.sin(t * 3.1)) * jaw, 0, 0.4);
     }
 
     // ---- twintail sway --------------------------------------------------------------
@@ -315,5 +367,6 @@ export class Animator {
     // Blink combines with happy-closed eyes (whichever closes more wins).
     rig.setMorph("blink", clamp(blink, 0, 1));
     rig.setMorph("aa", aa);
+    rig.setMorph("oh", oh);
   }
 }

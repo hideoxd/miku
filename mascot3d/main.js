@@ -25,7 +25,7 @@ function argVal(name, def) {
 }
 const hasFlag = (n) => process.argv.includes("--" + n);
 
-const SIZE = parseInt(argVal("size", "240"), 10);
+const SIZE = parseInt(argVal("size", "280"), 10);
 const FPS = Math.max(10, Math.min(60, parseInt(argVal("fps", "30"), 10)));
 const CORNER = argVal("corner", "bottom-right");
 const MODEL = path.resolve(argVal("model", path.join(__dirname, "..", "models", "miku.vrm")));
@@ -143,7 +143,23 @@ function createWindow() {
     const c = screen.getCursorScreenPoint();
     const [wx, wy] = win.getPosition();
     if (dragOffset) win.setPosition(Math.round(c.x - dragOffset.dx), Math.round(c.y - dragOffset.dy));
-    win.webContents.send("cursor", { x: c.x - wx, y: c.y - wy, dragging: !!dragOffset });
+    // The display Miku currently lives on — normalize gaze against its full
+    // extent so she accurately turns toward the cursor anywhere on screen,
+    // not just within her small window.
+    const disp = screen.getDisplayNearestPoint({ x: wx + Math.round(W / 2), y: wy + Math.round(H / 2) });
+    const b = disp.bounds;
+    win.webContents.send("cursor", {
+      x: c.x - wx, // window-relative (interact.js hit-testing)
+      y: c.y - wy,
+      dragging: !!dragOffset,
+      // screen-space geometry for accurate full-screen gaze:
+      cursorX: c.x,
+      cursorY: c.y,
+      headX: wx + W * 0.5, // Miku's head, roughly, in screen coords
+      headY: wy + H * 0.35,
+      spanX: b.width * 0.5, // half the display = full turn at the edge
+      spanY: b.height * 0.5,
+    });
   }, 33);
 }
 

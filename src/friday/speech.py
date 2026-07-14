@@ -61,13 +61,21 @@ class Speaker:
     def speak_events(self, events: Iterable[StreamEvent]) -> TurnTiming:
         """Consume a reply stream and speak it.
 
-        Fast local engines speak sentence-by-sentence as they stream in. Remote
-        engines that set ``prefers_full_text`` (Miku/GPT-SoVITS — each call has a
-        large GPU-allocation cost) buffer the whole reply and synthesize once.
+        Fast local engines speak sentence-by-sentence as they stream in.
+
+        Remote engines that set ``prefers_full_text`` (Miku/GPT-SoVITS — each
+        call pays a large cloud-GPU allocation cost) instead use a
+        *first-sentence-fast* strategy: the first completed sentence is
+        synthesized and spoken as soon as it's ready (so audio starts without
+        waiting for the whole reply), and every remaining sentence is buffered
+        and synthesized in a single batched call at the end. That keeps the
+        cloud round-trips to ~2 per turn while still cutting first-audio latency
+        dramatically.
         """
         full_text = getattr(self.tts, "prefers_full_text", False)
         chunker = SentenceChunker(self.min_chars)
-        buffer: list[str] = []
+        buffer: list[str] = []       # remaining-sentence batch (full_text engines)
+        spoke_first = False          # have we already sent the fast first sentence?
         timing = TurnTiming()
         t0 = time.perf_counter()
 
@@ -78,7 +86,12 @@ class Speaker:
                 if self.on_text:
                     self.on_text(event.text)
                 if full_text:
-                    buffer.append(event.text)
+                    for sentence in chunker.feed(event.text):
+                        if not spoke_first:
+                            self._say(sentence, timing, t0)  # fast first audio
+                            spoke_first = True
+                        else:
+                            buffer.append(sentence)
                 else:
                     for sentence in chunker.feed(event.text):
                         self._say(sentence, timing, t0)
@@ -88,7 +101,15 @@ class Speaker:
                 if self.on_tool:
                     self.on_tool(event.name)
 
-        tail = "".join(buffer).strip() if full_text else chunker.flush()
+        if full_text:
+            # Flush any partial trailing sentence into the batch, then speak the
+            # remainder in one call (or, if nothing spoke yet, the whole reply).
+            flushed = chunker.flush()
+            if flushed:
+                buffer.append(flushed)
+            tail = " ".join(s.strip() for s in buffer if s.strip())
+        else:
+            tail = chunker.flush()
         if tail:
             self._say(tail, timing, t0)
 
